@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hudi's Budget</title>
+<meta name="description" content="Connected personal budget: ledger, accounts, monthly plan, sinking funds and paycheck planner, backed by Supabase.">
+<meta name="theme-color" content="#1f3a33">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Budget">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
+<style>
+/* Layout: one column phone-first, max 760px, sticky header, bottom tab bar. Ledger-green accent, paper neutrals. */
+:root{
+  --bg:#f3f5f2; --surface:#ffffff; --surface-2:#eaeee9; --fg:#17241f; --muted:#5f6c66; --line:#d9e0db;
+  --accent:#1f6b4a; --accent-soft:#dcefe3; --accent-fg:#ffffff;
+  --warn:#b4482a; --warn-soft:#f7e3dc; --ok:#1f6b4a; --ok-soft:#dcefe3; --info-soft:#e7ecf6;
+  --display:"Sora",system-ui,sans-serif; --body:"Public Sans",system-ui,-apple-system,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --radius:14px; --shadow:0 1px 2px rgba(23,36,31,.06),0 6px 18px rgba(23,36,31,.05);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+  --bg:#121a17; --surface:#1a2420; --surface-2:#22302a; --fg:#e8efea; --muted:#9aaba2; --line:#2b3b34;
+  --accent:#7fcf9d; --accent-soft:#1f3a2e; --accent-fg:#0f1f18;
+  --warn:#f0876b; --warn-soft:#3d231b; --ok:#7fcf9d; --ok-soft:#1f3a2e; --info-soft:#23303d;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.3); color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --bg:#121a17; --surface:#1a2420; --surface-2:#22302a; --fg:#e8efea; --muted:#9aaba2; --line:#2b3b34;
+  --accent:#7fcf9d; --accent-soft:#1f3a2e; --accent-fg:#0f1f18;
+  --warn:#f0876b; --warn-soft:#3d231b; --ok:#7fcf9d; --ok-soft:#1f3a2e; --info-soft:#23303d;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.3); color-scheme:dark; }
+
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.45;-webkit-text-size-adjust:100%}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--bg);z-index:10}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:1.15rem;font-weight:600}
+h3{font-size:.95rem;font-weight:600}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.muted{color:var(--muted)}
+.small{font-size:.82rem}
+.eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+[hidden]{display:none!important}
+
+/* Header */
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;background:var(--bg);border-bottom:1px solid var(--line);
+  padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top .row{max-width:760px;margin:0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+header.top h1{font-size:1.15rem;font-weight:700;flex:1 1 auto}
+header.top h1 span{color:var(--accent)}
+.monthpick{display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:2px 6px}
+.monthpick button{border:0;background:transparent;padding:4px 8px;border-radius:999px;cursor:pointer;color:var(--muted)}
+.monthpick button:hover{background:var(--surface-2);color:var(--fg)}
+.monthpick .label{font-family:var(--display);font-weight:600;font-size:.9rem;min-width:84px;text-align:center}
+
+/* Main */
+main{max-width:760px;margin:0 auto;padding-block:16px 96px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
+section.view{display:grid;gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);min-width:0}
+.card-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.card-head .actions{display:flex;gap:6px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow);min-width:0}
+.tile .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:1.35rem;font-weight:600;margin-top:2px;line-height:1.15}
+.tile .v.neg{color:var(--warn)}
+.tile .sub{font-size:.78rem;color:var(--muted);margin-top:4px}
+.tile.hero{grid-column:1/-1;background:linear-gradient(135deg,var(--accent-soft),var(--surface) 70%)}
+.tile.hero .v{font-size:1.9rem}
+
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.over{background:var(--warn-soft);color:var(--warn)}
+.pill.info{background:var(--info-soft);color:var(--fg)}
+.pill.hist{background:var(--surface-2);color:var(--muted)}
+
+/* Tables */
+.tbl{width:100%;border-collapse:collapse;font-size:.9rem}
+.tbl th{text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;padding:6px 6px;border-bottom:1px solid var(--line)}
+.tbl td{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl tr:last-child td{border-bottom:0}
+.tbl td.r,.tbl th.r{text-align:right}
+.tbl tr.total td{font-weight:600;border-top:2px solid var(--line)}
+.tbl tr.group td{padding-top:12px;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;border-bottom:0}
+.tbl tr.click{cursor:pointer}
+.tbl tr.click:hover td{background:var(--surface-2)}
+.scrollx{overflow-x:auto;margin:0 -6px}
+.bar{height:6px;background:var(--surface-2);border-radius:999px;overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:999px}
+.bar i.over{background:var(--warn)}
+.sub{font-size:.78rem;color:var(--muted)}
+
+/* Ledger rows */
+.txlist{display:grid;gap:0}
+.tx{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.tx:last-child{border-bottom:0}
+.tx:hover{background:var(--surface-2);margin:0 -8px;padding-inline:8px;border-radius:8px}
+.tx .t{font-weight:500}
+.tx .d{font-size:.78rem;color:var(--muted);grid-column:1}
+.tx .a{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;text-align:right;grid-row:1/3;align-self:center}
+.tx .a.in{color:var(--ok)}
+.tx .a.out{color:var(--fg)}
+.tx .a.xfer{color:var(--muted)}
+.daysep{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;padding:12px 0 4px;border-bottom:1px solid var(--line)}
+
+/* Buttons & forms */
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:8px 12px;cursor:pointer;font-weight:500;font-size:.9rem;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.05)}
+.btn.danger{color:var(--warn);border-color:var(--warn)}
+.btn.sm{padding:5px 9px;font-size:.8rem}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.field{display:grid;gap:4px}
+.field label{font-size:.78rem;font-weight:600;color:var(--muted)}
+.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:9px 10px;min-height:40px}
+.field textarea{min-height:64px;resize:vertical}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:460px){.grid2{grid-template-columns:1fr}}
+.toggle{display:flex;gap:6px;flex-wrap:wrap}
+.toggle button{border:1px solid var(--line);background:var(--surface);padding:7px 11px;border-radius:999px;cursor:pointer;font-size:.85rem}
+.toggle button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+
+/* Modal */
+.modal{position:fixed;inset:0;background:rgba(10,18,14,.45);display:flex;align-items:flex-end;justify-content:center;z-index:20;padding:0}
+.modal .sheet{background:var(--surface);width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));display:grid;gap:12px}
+@media (min-width:640px){.modal{align-items:center;padding:20px}.modal .sheet{border-radius:18px}}
+.modal .sheet h2{font-size:1.05rem}
+.modal .foot{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.modal .foot .spacer{flex:1}
+
+/* Tab bar */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);z-index:9;
+  padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px))}
+nav.tabs .row{max-width:760px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
+nav.tabs button{border:0;background:transparent;padding:9px 4px 8px;cursor:pointer;color:var(--muted);display:grid;justify-items:center;gap:2px;font-size:.68rem;font-weight:600;letter-spacing:.02em}
+nav.tabs button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav.tabs button[aria-current="page"]{color:var(--accent)}
+
+/* Auth */
+.auth{max-width:420px;margin:12vh auto 0;display:grid;gap:14px}
+.auth .brand{display:flex;align-items:center;gap:12px}
+.auth .brand img{width:52px;height:52px;border-radius:12px}
+.auth h1{font-size:1.5rem}
+.msg{border-radius:10px;padding:10px 12px;font-size:.88rem;background:var(--info-soft)}
+.msg.err{background:var(--warn-soft);color:var(--warn)}
+.msg.ok{background:var(--ok-soft);color:var(--ok)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:9px 14px;border-radius:999px;font-size:.85rem;z-index:30;box-shadow:var(--shadow)}
+.empty{color:var(--muted);font-size:.9rem;padding:8px 0}
+.notes p{margin:0 0 8px}
+.notes b{font-family:var(--display);font-weight:600}
+.fab{position:fixed;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:9;background:var(--accent);color:var(--accent-fg);border:0;border-radius:999px;width:54px;height:54px;font-size:1.7rem;line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+@media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(12px);opacity:.6}to{transform:none;opacity:1}}}
+</style>
+</head>
+<body>
+
+<div id="authView" class="auth" hidden>
+  <div class="brand"><img src="apple-touch-icon.png" alt=""><div><h1>Hudi's Budget</h1><div class="muted small">Connected to your Supabase ledger</div></div></div>
+  <form id="authForm" class="card" style="display:grid;gap:10px">
+    <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="username" required placeholder="you@example.com"></div>
+    <div class="field"><label for="authPass">Password</label><input id="authPass" type="password" autocomplete="current-password" required minlength="6"></div>
+    <div id="authMsg" class="msg" hidden></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn primary" type="submit" id="btnSignIn">Sign in</button>
+      <button class="btn" type="button" id="btnSignUp">Create account</button>
+    </div>
+    <div class="small muted">Only your own emails can see this data. The first time, create the account with the password you want, then sign in.</div>
+  </form>
+</div>
+
+<div id="appView" hidden>
+  <header class="top"><div class="row">
+    <h1>Hudi's <span>Budget</span></h1>
+    <div class="monthpick" aria-label="Reporting month">
+      <button id="prevMonth" type="button" aria-label="Previous month">‹</button>
+      <div class="label" id="monthLabel">—</div>
+      <button id="nextMonth" type="button" aria-label="Next month">›</button>
+    </div>
+    <button class="btn sm" id="btnRefresh" type="button" title="Reload from Supabase">↻</button>
+  </div></header>
+
+  <main>
+    <div id="loadMsg" class="msg" hidden></div>
+    <section class="view" id="view-overview"></section>
+    <section class="view" id="view-ledger" hidden></section>
+    <section class="view" id="view-budget" hidden></section>
+    <section class="view" id="view-funds" hidden></section>
+    <section class="view" id="view-plan" hidden></section>
+  </main>
+
+  <button class="fab" id="fab" type="button" aria-label="Add transaction" title="Add transaction">+</button>
+
+  <nav class="tabs"><div class="row">
+    <button data-tab="overview" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Overview</button>
+    <button data-tab="ledger"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Ledger</button>
+    <button data-tab="budget"><svg viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15v-5M12 15V7M16 15v-3"/></svg>Budget</button>
+    <button data-tab="funds"><svg viewBox="0 0 24 24"><path d="M3 8h18v10H3z"/><path d="M3 12h18"/><circle cx="17" cy="15" r="1.2"/></svg>Funds</button>
+    <button data-tab="plan"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 2v4M16 2v4M4 10h16"/></svg>Plan</button>
+  </div></nav>
+</div>
+
+<div id="modalHost"></div>
+<div id="toastHost"></div>
+
+<script>
+(function(){
+'use strict';
+const SUPABASE_URL = 'https://xmewmjzaeltegqsvzrqh.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_vBTJAvdEn87JGi3YbTe-cw_WoZIZVUk';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
+
+const $ = (s, el=document) => el.querySelector(s);
+const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
+const fmt = n => { const v = Math.round((Number(n)||0)*100)/100; const s = Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); return (v<0?'-$':'$')+s; };
+const fmt0 = n => fmt(n);
+const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const todayISO = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
+const monthOf = iso => iso.slice(0,7);
+const monthName = m => { const [y,mo]=m.split('-').map(Number); return new Date(y,mo-1,1).toLocaleDateString('en-US',{month:'short',year:'numeric'}); };
+const shiftMonth = (m,d) => { const [y,mo]=m.split('-').map(Number); const dt=new Date(y,mo-1+d,1); return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0'); };
+const dayLabel = iso => { const [y,m,d]=iso.split('-').map(Number); return new Date(y,m-1,d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); };
+const r2 = n => Math.round(n*100)/100;
+
+let state = { tab:'overview', month: monthOf(todayISO()), data:null, calc:null, ledgerFilter:'all' };
+try { const t = localStorage.getItem('pb_tab'); if (t) state.tab = t; } catch(e){}
+
+function toast(msg, ms=2200){ const h=$('#toastHost'); h.innerHTML=`<div class="toast">${esc(msg)}</div>`; clearTimeout(h._t); h._t=setTimeout(()=>h.innerHTML='',ms); }
+
+/* ---------- Auth ---------- */
+async function initAuth(){
+  const { data:{ session } } = await sb.auth.getSession();
+  if (session) { showApp(); } else { showAuth(); }
+  sb.auth.onAuthStateChange((ev, s) => { if (s && $('#appView').hidden) showApp(); if (!s && !$('#appView').hidden) showAuth(); });
+}
+function showAuth(){ $('#authView').hidden=false; $('#appView').hidden=true; }
+function authMsg(text, kind){ const m=$('#authMsg'); m.hidden=!text; m.textContent=text||''; m.className='msg'+(kind?' '+kind:''); }
+$('#authForm').addEventListener('submit', async e => {
+  e.preventDefault(); authMsg('Signing in…');
+  const { error } = await sb.auth.signInWithPassword({ email: $('#authEmail').value.trim(), password: $('#authPass').value });
+  if (error) { authMsg(error.message.includes('Email not confirmed') ? 'Email not confirmed yet. Open the confirmation email from Supabase and tap its link, then sign in again.' : error.message, 'err'); return; }
+  authMsg('');
+});
+$('#btnSignUp').addEventListener('click', async () => {
+  const email=$('#authEmail').value.trim(), password=$('#authPass').value;
+  if (!email || password.length<6) { authMsg('Enter your email and a password of at least 6 characters, then tap Create account.', 'err'); return; }
+  authMsg('Creating account…');
+  const { data, error } = await sb.auth.signUp({ email, password });
+  if (error) { authMsg(error.message, 'err'); return; }
+  if (data.session) { authMsg(''); return; }
+  authMsg('Account created. Check your email for a confirmation link from Supabase, tap it (the page it opens may look blank, that is fine), then come back here and sign in.', 'ok');
+});
+
+async function showApp(){
+  $('#authView').hidden=true; $('#appView').hidden=false;
+  await loadAll();
+}
+
+/* ---------- Data ---------- */
+async function loadAll(){
+  const lm=$('#loadMsg'); lm.hidden=false; lm.className='msg'; lm.textContent='Loading from Supabase…';
+  const qs = {
+    accounts: sb.from('pb_accounts').select('*').order('sort'),
+    transactions: sb.from('pb_transactions').select('*').order('date',{ascending:false}).order('id',{ascending:false}),
+    categories: sb.from('pb_categories').select('*').order('sort'),
+    funds: sb.from('pb_funds').select('*').order('sort'),
+    allocations: sb.from('pb_allocations').select('*').order('date',{ascending:false}).order('id',{ascending:false}),
+    settings: sb.from('pb_settings').select('*').order('sort'),
+    notes: sb.from('pb_notes').select('*').order('sort'),
+  };
+  const keys=Object.keys(qs); const res = await Promise.all(keys.map(k=>qs[k]));
+  const err = res.find(r=>r.error);
+  if (err) { lm.className='msg err'; lm.textContent='Could not load: '+err.error.message+(err.error.message.match(/permission|policy|row-level/i)?' (this email is not on the allowed list)':''); return; }
+  const data={}; keys.forEach((k,i)=>data[k]=res[i].data||[]);
+  data.settingsMap = Object.fromEntries(data.settings.map(s=>[s.key, s]));
+  if (data.transactions.length===0 && data.accounts.length===0) { lm.className='msg'; lm.textContent='No data yet. Add your first transaction with the + button.'; }
+  else lm.hidden=true;
+  state.data=data; recompute(); render();
+}
+const num = v => Number(v)||0;
+const setting = k => num(state.data.settingsMap[k]?.value);
+
+function recompute(){
+  const d=state.data; const c={};
+  const live = d.transactions.filter(t=>!t.historical);
+  // Account balances (ledger inflows minus outflows, non-historical rows)
+  c.balance={}; d.accounts.forEach(a=>c.balance[a.name]=0);
+  live.forEach(t=>{ if (t.to_account in c.balance) c.balance[t.to_account]+=num(t.amount); if (t.from_account in c.balance) c.balance[t.from_account]-=num(t.amount); });
+  for (const k in c.balance) c.balance[k]=r2(c.balance[k]);
+  c.cashAccounts=d.accounts.filter(a=>a.kind==='cash'&&a.active);
+  c.creditAccounts=d.accounts.filter(a=>a.kind==='credit'&&a.active);
+  c.otherAccounts=d.accounts.filter(a=>a.kind==='excluded'&&a.active);
+  c.totalCash=r2(c.cashAccounts.reduce((s,a)=>s+c.balance[a.name],0));
+  c.cardDebt=r2(c.creditAccounts.reduce((s,a)=>s+Math.max(0,-c.balance[a.name]),0));
+  c.cashLessDebt=r2(c.totalCash-c.cardDebt);
+  c.reserves=r2(c.cashAccounts.filter(a=>a.in_spendable).reduce((s,a)=>s+num(a.min_reserve),0));
+  c.liquid=r2(c.cashAccounts.filter(a=>a.in_spendable).reduce((s,a)=>s+c.balance[a.name],0));
+  c.cardExcluded=setting('card_promo_excluded');
+  c.spendable=r2(c.liquid-c.reserves-(c.cardDebt-c.cardExcluded));
+  // Funds: allocations minus post-opening spending in their categories
+  c.funds=d.funds.filter(f=>f.active).map(f=>{
+    const allocated=r2(d.allocations.filter(a=>a.fund===f.name).reduce((s,a)=>s+num(a.amount),0));
+    const cats=new Set(f.spend_categories||[]);
+    const spent=r2(live.filter(t=>cats.has(t.category)&&(t.type==='Expense'||t.type==='Refund')).reduce((s,t)=>s+(t.type==='Expense'?num(t.amount):-num(t.amount)),0));
+    return {...f, allocated, spent, balance:r2(allocated-spent)};
+  });
+  c.earmarked=r2(c.funds.reduce((s,f)=>s+f.allocated,0));
+  c.fundSpent=r2(c.funds.reduce((s,f)=>s+f.spent,0));
+  c.earmarksAvail=r2(c.earmarked-c.fundSpent);
+  c.reconDiff=r2(c.earmarksAvail-c.spendable);
+  c.balanced=Math.abs(c.reconDiff)<0.01;
+  // Month budget
+  const m=state.month; const mt=d.transactions.filter(t=>t.month===m);
+  const expenseActual=cat=>r2(mt.filter(t=>t.category===cat&&(t.type==='Expense'||t.type==='Refund')).reduce((s,t)=>s+(t.type==='Expense'?num(t.amount):-num(t.amount)),0));
+  const toAccountActual=acct=>r2(mt.filter(t=>t.to_account===acct&&(t.type==='Transfer'||t.type==='Income')).reduce((s,t)=>s+num(t.amount),0));
+  c.budget=d.categories.filter(x=>x.active).map(x=>{
+    const actual=x.actual_rule==='to_account'?toAccountActual(x.rule_account):expenseActual(x.name);
+    const target=num(x.monthly_target); const remaining=r2(target-actual);
+    return {...x, target, actual, remaining, over: remaining<-0.004};
+  });
+  const known=new Set(d.categories.map(x=>x.name)); known.add('Opening balance'); known.add('Paycheck');
+  const extra={}; mt.forEach(t=>{ if ((t.type==='Expense'||t.type==='Refund')&&!known.has(t.category)) { extra[t.category]=(extra[t.category]||0)+(t.type==='Expense'?num(t.amount):-num(t.amount)); }});
+  c.budgetExtra=Object.entries(extra).map(([name,actual])=>({name,actual:r2(actual)}));
+  c.takeHome=setting('biweekly_take_home'); c.dad=setting('dad_monthly');
+  c.monthIncome=r2(c.takeHome*2+c.dad);
+  c.totalAllocated=r2(c.budget.filter(b=>b.in_total).reduce((s,b)=>s+b.target,0));
+  c.cushion=r2(c.monthIncome-c.totalAllocated);
+  c.monthSpent=r2(c.budget.filter(b=>b.actual_rule==='expense').reduce((s,b)=>s+b.actual,0)+c.budgetExtra.reduce((s,b)=>s+b.actual,0));
+  c.monthIncomeActual=r2(mt.filter(t=>t.type==='Income'&&!t.historical).reduce((s,t)=>s+num(t.amount),0));
+  // Paycheck planner
+  c.plan=c.budget.filter(b=>b.in_total&&b.target>0).map(b=>({...b, perCheck: b.per_paycheck!=null?num(b.per_paycheck):r2(b.target/2)}));
+  c.planTotal=r2(c.plan.reduce((s,p)=>s+p.perCheck,0));
+  c.planGap=r2(c.takeHome-c.planTotal);
+  // Goals
+  const hysa=d.accounts.find(a=>/hysa/i.test(a.name)); c.hysaName=hysa?hysa.name:null; c.hysaBal=hysa?c.balance[hysa.name]:0;
+  const hysaCat=d.categories.find(x=>x.actual_rule==='to_account'&&x.rule_account===c.hysaName); c.hysaMonthly=hysaCat?num(hysaCat.monthly_target):0;
+  c.hysa12=r2(c.hysaBal+12*c.hysaMonthly);
+  c.extraCheck=setting('extra_paycheck_estimate'); c.afterPayoff=r2(c.extraCheck-c.cardExcluded);
+  c.roth=r2(live.filter(t=>t.to_account==='Roth IRA'&&t.type==='Transfer').reduce((s,t)=>s+num(t.amount),0));
+  c.commissionNet=r2(live.filter(t=>t.type==='Income'&&/commission/i.test(t.category)).reduce((s,t)=>s+num(t.amount),0));
+  c.tdSavingsNet=r2(c.balance['TD Savings']||0);
+  state.calc=c;
+}
+
+/* ---------- Render ---------- */
+function render(){
+  $$('nav.tabs button').forEach(b=>b.setAttribute('aria-current', b.dataset.tab===state.tab?'page':'false'));
+  ['overview','ledger','budget','funds','plan'].forEach(v=>$('#view-'+v).hidden=v!==state.tab);
+  $('#monthLabel').textContent=monthName(state.month);
+  if (!state.calc) return;
+  renderOverview(); renderLedger(); renderBudget(); renderFunds(); renderPlan();
+}
+
+function renderOverview(){
+  const c=state.calc, d=state.data; const el=$('#view-overview');
+  const over=c.budget.filter(b=>b.over);
+  el.innerHTML=`
+  <div class="tiles">
+    <div class="tile hero"><div class="eyebrow">Spendable after reserves</div><div class="v ${c.spendable<0?'neg':''}">${fmt(c.spendable)}</div>
+      <div class="sub">Checking + cash, minus ${fmt(c.reserves)} reserves and new card charges. Earmarks available ${fmt(c.earmarksAvail)} &middot; <span class="pill ${c.balanced?'ok':'over'}">${c.balanced?'Balanced':'Review '+fmt(c.reconDiff)}</span></div></div>
+    <div class="tile"><div class="eyebrow">Total cash</div><div class="v">${fmt(c.totalCash)}</div><div class="sub">Incl. HYSA, excl. TD Savings</div></div>
+    <div class="tile"><div class="eyebrow">Card debt</div><div class="v ${c.cardDebt>c.cardExcluded+0.004?'neg':''}">${fmt(c.cardDebt)}</div><div class="sub">${fmt(c.cardExcluded)} covered by the extra check</div></div>
+    <div class="tile"><div class="eyebrow">${esc(monthName(state.month))} spent</div><div class="v">${fmt(c.monthSpent)}</div><div class="sub">of ${fmt(c.totalAllocated)} planned${over.length?` &middot; <span class="pill over">${over.length} over</span>`:''}</div></div>
+    <div class="tile"><div class="eyebrow">Plan cushion</div><div class="v ${c.cushion<0?'neg':''}">${fmt(c.cushion)}</div><div class="sub">${fmt(c.monthIncome)} income minus plan</div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Accounts</h2><button class="btn sm" data-act="edit-accounts">Edit</button></div>
+    <table class="tbl"><tbody>
+      ${c.cashAccounts.map(a=>`<tr class="click" data-act="acct" data-name="${esc(a.name)}"><td>${esc(a.name)}<div class="sub">${esc(a.notes||'')}</div></td><td class="r num">${fmt(c.balance[a.name])}</td></tr>`).join('')}
+      <tr class="total"><td>Total cash</td><td class="r num">${fmt(c.totalCash)}</td></tr>
+      ${c.creditAccounts.filter(a=>Math.abs(c.balance[a.name])>0.004||/sapphire|active cash/i.test(a.name)).map(a=>`<tr class="click" data-act="acct" data-name="${esc(a.name)}"><td>${esc(a.name)}<div class="sub">${esc(a.notes||'')}</div></td><td class="r num">${fmt(Math.max(0,-c.balance[a.name]))} owed</td></tr>`).join('')}
+      <tr class="total"><td>Cash less card debt</td><td class="r num">${fmt(c.cashLessDebt)}</td></tr>
+      ${c.otherAccounts.map(a=>`<tr class="click" data-act="acct" data-name="${esc(a.name)}"><td>${esc(a.name)} <span class="pill info">not counted</span><div class="sub">${esc(a.notes||'')}</div></td><td class="r num muted">${fmt(c.balance[a.name])} net</td></tr>`).join('')}
+    </tbody></table>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>${esc(monthName(state.month))} at a glance</h2><button class="btn sm" data-tab-go="budget">Full budget</button></div>
+    ${budgetRows(c.budget.filter(b=>b.target>0||b.actual!==0).slice(0,8), true)}
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Recent activity</h2><button class="btn sm" data-tab-go="ledger">All</button></div>
+    ${txRows(d.transactions.slice(0,6))}
+  </div>`;
+}
+
+function budgetRows(rows, compact){
+  if (!rows.length) return '<div class="empty">Nothing here yet.</div>';
+  return `<table class="tbl"><tbody>${rows.map(b=>{
+    const pct=b.target>0?Math.min(100,Math.max(0,b.actual/b.target*100)):(b.actual>0?100:0);
+    return `<tr class="click" data-act="cat" data-id="${b.id}"><td>${esc(b.name)}${b.actual_rule==='to_account'?' <span class="pill info">transfer</span>':''}${b.over?' <span class="pill over">Over</span>':''}
+      ${compact?'':`<div class="sub">${esc(b.details||'')}</div>`}<div class="bar"><i class="${b.over?'over':''}" style="width:${pct}%"></i></div></td>
+      <td class="r"><div class="num">${fmt(b.actual)}</div><div class="sub num">of ${fmt(b.target)}</div></td></tr>`;}).join('')}</tbody></table>`;
+}
+
+function txRows(list){
+  if (!list.length) return '<div class="empty">No transactions yet.</div>';
+  let out='', lastDay='';
+  list.forEach(t=>{
+    if (t.date!==lastDay){ out+=`<div class="daysep">${esc(dayLabel(t.date))}</div>`; lastDay=t.date; }
+    const dir=t.type==='Income'||t.type==='Refund'?'in':(t.type==='Transfer'||t.type==='Opening'?'xfer':'out');
+    const sign=dir==='in'?'+':(dir==='out'?'−':'');
+    const who=t.type==='Expense'?`from ${t.from_account}`:(t.type==='Income'||t.type==='Refund'?`to ${t.to_account}`:`${t.from_account} → ${t.to_account}`);
+    out+=`<div class="tx" data-act="tx" data-id="${t.id}"><div class="t">${esc(t.category||t.type)}${t.historical?' <span class="pill hist">history</span>':''}</div><div class="d">${esc(who)}${t.description?' · '+esc(t.description):''}</div><div class="a ${dir}">${sign}${fmt(num(t.amount)).replace('-$','-$')}</div></div>`;
+  });
+  return `<div class="txlist">${out}</div>`;
+}
+
+function renderLedger(){
+  const d=state.data; const el=$('#view-ledger');
+  const months=[...new Set(d.transactions.map(t=>t.month))].sort().reverse();
+  const f=state.ledgerFilter;
+  let list=d.transactions;
+  if (f==='month') list=list.filter(t=>t.month===state.month);
+  else if (f==='expense') list=list.filter(t=>t.type==='Expense'||t.type==='Refund');
+  else if (f==='transfer') list=list.filter(t=>t.type==='Transfer'||t.type==='Opening');
+  else if (f==='income') list=list.filter(t=>t.type==='Income');
+  const inM=d.transactions.filter(t=>t.month===state.month);
+  const spent=r2(inM.filter(t=>t.type==='Expense').reduce((s,t)=>s+num(t.amount),0)-inM.filter(t=>t.type==='Refund').reduce((s,t)=>s+num(t.amount),0));
+  const income=r2(inM.filter(t=>t.type==='Income').reduce((s,t)=>s+num(t.amount),0));
+  el.innerHTML=`
+  <div class="card">
+    <div class="card-head"><h2>Ledger</h2><button class="btn primary sm" data-act="add-tx">+ Add</button></div>
+    <div class="toggle" role="group" aria-label="Filter">
+      ${[['all','All'],['month',monthName(state.month)],['expense','Spending'],['income','Income'],['transfer','Transfers']].map(([k,l])=>`<button type="button" data-filter="${k}" aria-pressed="${f===k}">${esc(l)}</button>`).join('')}
+    </div>
+    <div class="sub" style="margin-top:8px">${esc(monthName(state.month))}: ${fmt(spent)} spent &middot; ${fmt(income)} income &middot; ${inM.length} rows${months.length?'':''}</div>
+  </div>
+  <div class="card">${txRows(list.slice(0,300))}${list.length>300?`<div class="sub">Showing the latest 300 of ${list.length}.</div>`:''}</div>`;
+}
+
+function renderBudget(){
+  const c=state.calc; const el=$('#view-budget');
+  const groups=[...new Set(c.budget.map(b=>b.grp||'Other'))];
+  el.innerHTML=`
+  <div class="tiles">
+    <div class="tile"><div class="eyebrow">Monthly income</div><div class="v">${fmt(c.monthIncome)}</div><div class="sub">2 × ${fmt(c.takeHome)} + ${fmt(c.dad)} from dad</div></div>
+    <div class="tile"><div class="eyebrow">Planned</div><div class="v">${fmt(c.totalAllocated)}</div><div class="sub">Cushion ${fmt(c.cushion)}</div></div>
+    <div class="tile"><div class="eyebrow">${esc(monthName(state.month))} actual</div><div class="v">${fmt(c.monthSpent)}</div><div class="sub">Income logged ${fmt(c.monthIncomeActual)}</div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Budget vs actual</h2><button class="btn sm" data-act="add-cat">+ Category</button></div>
+    <table class="tbl"><thead><tr><th>Category</th><th class="r">Actual</th><th class="r">Left</th></tr></thead><tbody>
+    ${groups.map(g=>`<tr class="group"><td colspan="3">${esc(g)}</td></tr>`+c.budget.filter(b=>(b.grp||'Other')===g).map(b=>`
+      <tr class="click" data-act="cat" data-id="${b.id}"><td>${esc(b.name)}${b.actual_rule==='to_account'?' <span class="pill info">transfer</span>':''}${!b.in_total?' <span class="pill hist">unbudgeted</span>':''}<div class="sub">${esc(b.details||'')}${b.target>0?' · target '+fmt(b.target):''}</div></td>
+      <td class="r num">${fmt(b.actual)}</td><td class="r num" style="${b.over?'color:var(--warn)':''}">${fmt(b.remaining)}${b.over?' <span class="pill over">Over</span>':''}</td></tr>`).join('')).join('')}
+    ${c.budgetExtra.length?`<tr class="group"><td colspan="3">Not in plan</td></tr>`+c.budgetExtra.map(b=>`<tr><td>${esc(b.name)}<div class="sub">Logged this month without a budget line</div></td><td class="r num">${fmt(b.actual)}</td><td class="r num" style="color:var(--warn)">${fmt(-b.actual)}</td></tr>`).join(''):''}
+    <tr class="total"><td>Total planned</td><td class="r num">${fmt(c.monthSpent)}</td><td class="r num">${fmt(c.totalAllocated)}</td></tr>
+    </tbody></table>
+    <div class="sub" style="margin-top:8px">Actual = expenses minus refunds in that category for ${esc(monthName(state.month))}. Transfer lines count money moved into that account. Tap a line to edit its target.</div>
+  </div>`;
+}
+
+function renderFunds(){
+  const c=state.calc, d=state.data; const el=$('#view-funds');
+  const grps=[...new Set(c.funds.map(f=>f.grp))];
+  el.innerHTML=`
+  <div class="tiles">
+    <div class="tile"><div class="eyebrow">Earmarked</div><div class="v">${fmt(c.earmarked)}</div><div class="sub">All allocations to date</div></div>
+    <div class="tile"><div class="eyebrow">Spent from funds</div><div class="v">${fmt(c.fundSpent)}</div><div class="sub">Since the Nov 4 opening</div></div>
+    <div class="tile"><div class="eyebrow">Reconciliation</div><div class="v ${c.balanced?'':'neg'}">${c.balanced?'Balanced':fmt(c.reconDiff)}</div><div class="sub">Earmarks ${fmt(c.earmarksAvail)} vs spendable ${fmt(c.spendable)}</div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Sinking funds</h2><div class="actions"><button class="btn sm" data-act="add-fund">+ Fund</button><button class="btn primary sm" data-act="add-alloc">+ Allocate</button></div></div>
+    <table class="tbl"><thead><tr><th>Fund</th><th class="r">Balance</th></tr></thead><tbody>
+    ${grps.map(g=>`<tr class="group"><td colspan="2">${esc(g)}</td></tr>`+c.funds.filter(f=>f.grp===g).map(f=>{
+      const pct=f.allocated>0?Math.min(100,Math.max(0,f.balance/f.allocated*100)):0;
+      return `<tr class="click" data-act="fund" data-id="${f.id}"><td>${esc(f.name)}<div class="sub">${num(f.monthly_add)>0?'+'+fmt(f.monthly_add)+'/mo · ':''}${esc(f.notes||'')}</div><div class="bar"><i class="${f.balance<0?'over':''}" style="width:${pct}%"></i></div></td>
+      <td class="r"><div class="num" style="${f.balance<0?'color:var(--warn)':''}">${fmt(f.balance)}</div><div class="sub num">${fmt(f.allocated)} in · ${fmt(f.spent)} out</div></td></tr>`;}).join('')).join('')}
+    <tr class="total"><td>Available earmarks</td><td class="r num">${fmt(c.earmarksAvail)}</td></tr>
+    </tbody></table>
+    <div class="sub" style="margin-top:8px">Balance = allocations in, minus expenses (less refunds) logged in the fund's categories. Add earmarks here, never as bank transfers.</div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Allocation ledger</h2></div>
+    ${d.allocations.length?`<table class="tbl"><tbody>${d.allocations.slice(0,200).map(a=>`<tr class="click" data-act="alloc" data-id="${a.id}"><td><div>${esc(a.fund)}</div><div class="sub">${esc(dayLabel(a.date))}${a.source?' · '+esc(a.source):''}${a.details?' · '+esc(a.details):''}</div></td><td class="r num" style="${num(a.amount)<0?'color:var(--warn)':''}">${num(a.amount)<0?'':'+'}${fmt(a.amount)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">No allocations yet.</div>'}
+  </div>`;
+}
+
+function renderPlan(){
+  const c=state.calc, d=state.data; const el=$('#view-plan');
+  el.innerHTML=`
+  <div class="card">
+    <div class="card-head"><h2>Paycheck planner</h2><button class="btn primary sm" data-act="log-paycheck">Log a paycheck</button></div>
+    <div class="tiles" style="margin-bottom:10px">
+      <div class="tile"><div class="eyebrow">Take-home per check</div><div class="v">${fmt(c.takeHome)}</div></div>
+      <div class="tile"><div class="eyebrow">Set aside per check</div><div class="v">${fmt(c.planTotal)}</div><div class="sub">Gap ${fmt(c.planGap)}${c.planGap<0?' (short)':' left over'}</div></div>
+    </div>
+    <table class="tbl"><thead><tr><th>Category</th><th class="r">Each check</th><th class="r">Monthly</th></tr></thead><tbody>
+      ${c.plan.map(p=>`<tr class="click" data-act="cat" data-id="${p.id}"><td>${esc(p.name)}</td><td class="r num">${fmt(p.perCheck)}</td><td class="r num">${fmt(p.target)}</td></tr>`).join('')}
+      <tr class="total"><td>Total</td><td class="r num">${fmt(c.planTotal)}</td><td class="r num">${fmt(c.totalAllocated)}</td></tr>
+    </tbody></table>
+    <div class="sub" style="margin-top:8px">Each check = monthly target ÷ 2, except Student loans (dad's ${fmt(c.dad)} covers the rest). Tap a line to change it.</div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Cash &amp; goals</h2></div>
+    <table class="tbl"><tbody>
+      <tr><td>${esc(c.hysaName||'HYSA')} balance</td><td class="r num">${fmt(c.hysaBal)}</td></tr>
+      <tr><td>HYSA in 12 months<div class="sub">${fmt(c.hysaMonthly)}/month, no interest counted</div></td><td class="r num">${fmt(c.hysa12)}</td></tr>
+      <tr><td>Extra paycheck estimate<div class="sub">${esc(d.settingsMap.extra_paycheck_estimate?.notes||'')}</div></td><td class="r num">${fmt(c.extraCheck)}</td></tr>
+      <tr><td>After card payoff<div class="sub">Extra check minus ${fmt(c.cardExcluded)}</div></td><td class="r num">${fmt(c.afterPayoff)}</td></tr>
+      <tr><td>TD Savings net change<div class="sub">Since opening; full balance unknown</div></td><td class="r num">${fmt(c.tdSavingsNet)}</td></tr>
+      <tr><td>Roth IRA contributed<div class="sub">Transfers into Roth IRA</div></td><td class="r num">${fmt(c.roth)}</td></tr>
+      <tr><td>Commission received<div class="sub">Income rows with category Commission; estimate ${fmt(setting('commission_quarterly_gross')+setting('bonus_quarterly_gross'))}/quarter gross</div></td><td class="r num">${fmt(c.commissionNet)}</td></tr>
+    </tbody></table>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Settings</h2></div>
+    <table class="tbl"><tbody>${d.settings.map(s=>`<tr class="click" data-act="setting" data-key="${esc(s.key)}"><td>${esc(s.label)}<div class="sub">${esc(s.notes||'')}</div></td><td class="r num">${isNaN(Number(s.value))?esc(s.value):fmt(s.value)}</td></tr>`).join('')}</tbody></table>
+  </div>
+  <div class="card notes">
+    <div class="card-head"><h2>Rules &amp; notes</h2><button class="btn sm" data-act="add-note">+ Note</button></div>
+    ${d.notes.map(n=>`<p data-act="note" data-id="${n.id}" style="cursor:pointer"><b>${esc(n.title)}.</b> ${esc(n.body)}</p>`).join('')||'<div class="empty">No notes.</div>'}
+  </div>
+  <div class="card"><div class="card-head"><h2>Account</h2></div><div class="sub" id="whoami"></div><div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="change-pass">Change password</button><button class="btn sm" data-act="signout">Sign out</button></div></div>`;
+  sb.auth.getUser().then(({data})=>{ const w=$('#whoami'); if (w&&data.user) w.textContent='Signed in as '+data.user.email; });
+}
+
+/* ---------- Modal forms ---------- */
+function openModal(title, fieldsHTML, onSave, opts={}){
+  const host=$('#modalHost');
+  host.innerHTML=`<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><form class="sheet" id="modalForm">
+    <h2>${esc(title)}</h2>${fieldsHTML}<div id="modalErr" class="msg err" hidden></div>
+    <div class="foot">${opts.onDelete?'<button type="button" class="btn danger" id="modalDelete">Delete</button>':''}<span class="spacer"></span><button type="button" class="btn" id="modalCancel">Cancel</button><button type="submit" class="btn primary">${esc(opts.saveLabel||'Save')}</button></div>
+  </form></div>`;
+  const close=()=>host.innerHTML='';
+  $('#modalCancel').onclick=close; host.querySelector('.modal').addEventListener('click',e=>{ if(e.target===e.currentTarget) close(); });
+  const form=$('#modalForm');
+  form.onsubmit=async e=>{ e.preventDefault(); const btn=form.querySelector('[type=submit]'); btn.disabled=true;
+    try{ await onSave(new FormData(form), form); close(); } catch(err){ $('#modalErr').hidden=false; $('#modalErr').textContent=err.message||String(err); btn.disabled=false; } };
+  if (opts.onDelete) $('#modalDelete').onclick=async()=>{ const b=$('#modalDelete'); if (b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Tap again to delete'; return; } try{ await opts.onDelete(); close(); } catch(err){ $('#modalErr').hidden=false; $('#modalErr').textContent=err.message; } };
+  if (opts.after) opts.after(form);
+  const first=form.querySelector('input:not([type=hidden]),select'); if (first && window.innerWidth>700) first.focus();
+}
+const F = {
+  text:(name,label,val='',extra='')=>`<div class="field"><label for="f_${name}">${esc(label)}</label><input id="f_${name}" name="${name}" value="${esc(val)}" ${extra}></div>`,
+  num:(name,label,val='',extra='')=>`<div class="field"><label for="f_${name}">${esc(label)}</label><input id="f_${name}" name="${name}" type="number" step="0.01" inputmode="decimal" value="${esc(val)}" ${extra}></div>`,
+  date:(name,label,val)=>`<div class="field"><label for="f_${name}">${esc(label)}</label><input id="f_${name}" name="${name}" type="date" value="${esc(val)}" required></div>`,
+  sel:(name,label,options,val)=>`<div class="field"><label for="f_${name}">${esc(label)}</label><select id="f_${name}" name="${name}">${options.map(o=>{const [v,l]=Array.isArray(o)?o:[o,o];return `<option value="${esc(v)}" ${v===val?'selected':''}>${esc(l)}</option>`;}).join('')}</select></div>`,
+  area:(name,label,val='')=>`<div class="field"><label for="f_${name}">${esc(label)}</label><textarea id="f_${name}" name="${name}">${esc(val)}</textarea></div>`,
+  check:(name,label,on)=>`<label class="field" style="flex-direction:row;align-items:center;gap:8px;display:flex"><input type="checkbox" name="${name}" ${on?'checked':''} style="width:auto"> <span>${esc(label)}</span></label>`,
+};
+const afterSave = async msg => { toast(msg); await loadAll(); };
+const dbErr = r => { if (r.error) throw new Error(r.error.message); return r; };
+
+function accountOptions(extraFirst){ const names=state.data.accounts.filter(a=>a.active).map(a=>a.name); return [...extraFirst, ...names]; }
+function categoryList(){ const s=new Set(state.data.categories.map(c=>c.name)); state.data.funds.forEach(f=>(f.spend_categories||[]).forEach(c=>s.add(c))); s.add('Paycheck'); s.add('Commission'); s.add('Opening balance'); return [...s]; }
+
+function txForm(t){
+  const isNew=!t; t=t||{date:todayISO(),type:'Expense',from_account:'Chase Checking',to_account:'External',category:'',amount:'',description:'',historical:false};
+  const cats=categoryList();
+  const html=`
+    ${F.sel('type','Type',['Expense','Income','Transfer','Refund','Opening'],t.type)}
+    <div class="grid2">${F.date('date','Date',t.date)}${F.num('amount','Amount',t.amount,'required min="0.01"')}</div>
+    <div class="grid2">${F.sel('from_account','From',accountOptions(['External','Opening']),t.from_account)}${F.sel('to_account','To',accountOptions(['External']),t.to_account)}</div>
+    <div class="field"><label for="f_category">Category</label><input id="f_category" name="category" list="catlist" value="${esc(t.category)}" autocomplete="off"><datalist id="catlist">${cats.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+    ${F.text('description','Description',t.description)}
+    ${isNew?'':F.check('historical','Historical (counts in monthly actuals, not in balances)',t.historical)}`;
+  openModal(isNew?'Add transaction':'Edit transaction', html, async fd=>{
+    const row={date:fd.get('date'),type:fd.get('type'),from_account:fd.get('from_account'),to_account:fd.get('to_account'),category:(fd.get('category')||'').trim(),amount:Number(fd.get('amount')),description:(fd.get('description')||'').trim()};
+    if (!isNew) row.historical=!!fd.get('historical');
+    if (row.type!=='Opening' && !(row.amount>0)) throw new Error('Amount must be a positive number. Use type Refund for money coming back.');
+    if (row.from_account===row.to_account) throw new Error('From and To must be different.');
+    if (row.type==='Expense' && !row.category) throw new Error('Pick a category so the budget and funds stay connected.');
+    dbErr(isNew? await sb.from('pb_transactions').insert(row) : await sb.from('pb_transactions').update(row).eq('id',t.id));
+    await afterSave(isNew?'Transaction added':'Saved');
+  },{ onDelete: isNew?null: async()=>{ dbErr(await sb.from('pb_transactions').delete().eq('id',t.id)); await afterSave('Deleted'); },
+    after: form=>{ const typeSel=form.querySelector('[name=type]'), from=form.querySelector('[name=from_account]'), to=form.querySelector('[name=to_account]');
+      typeSel.addEventListener('change',()=>{ const v=typeSel.value;
+        if (v==='Expense'){ from.value=from.value==='External'?'Chase Checking':from.value; to.value='External'; }
+        else if (v==='Income'){ from.value='External'; to.value=to.value==='External'?'Chase Checking':to.value; }
+        else if (v==='Refund'){ from.value='External'; if (to.value==='External') to.value='Chase Checking'; }
+        else if (v==='Transfer'){ if (from.value==='External') from.value='Chase Checking'; if (to.value==='External') to.value='Barclays HYSA'; }
+        else if (v==='Opening'){ from.value='Opening'; if (to.value==='External') to.value='Chase Checking'; }
+      }); } });
+}
+
+function allocForm(a){
+  const isNew=!a; a=a||{date:todayISO(),fund:state.data.funds[0]?.name||'',amount:'',source:'',details:''};
+  const html=`<div class="grid2">${F.date('date','Date',a.date)}${F.num('amount','Amount (+ fund, − release)',a.amount,'required')}</div>
+    ${F.sel('fund','Fund',state.data.funds.filter(f=>f.active).map(f=>f.name),a.fund)}${F.text('source','Source',a.source,'placeholder="e.g. Nov 18 paycheck"')}${F.text('details','Details',a.details)}`;
+  openModal(isNew?'Allocate to a fund':'Edit allocation', html, async fd=>{
+    const row={date:fd.get('date'),fund:fd.get('fund'),amount:Number(fd.get('amount')),source:(fd.get('source')||'').trim(),details:(fd.get('details')||'').trim()};
+    if (!row.amount) throw new Error('Enter an amount.');
+    dbErr(isNew? await sb.from('pb_allocations').insert(row) : await sb.from('pb_allocations').update(row).eq('id',a.id));
+    await afterSave(isNew?'Allocated':'Saved');
+  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_allocations').delete().eq('id',a.id)); await afterSave('Deleted'); } });
+}
+
+function catForm(c){
+  const isNew=!c; c=c||{name:'',monthly_target:0,per_paycheck:null,details:'',grp:'Living',actual_rule:'expense',rule_account:'',in_total:true,sort:(state.data.categories.length+1),active:true};
+  const grps=[...new Set(state.data.categories.map(x=>x.grp).filter(Boolean))];
+  const html=`${F.text('name','Name',c.name,'required')}<div class="grid2">${F.num('monthly_target','Monthly target',c.monthly_target,'required')}${F.num('per_paycheck','Per paycheck (blank = half)',c.per_paycheck??'')}</div>
+    <div class="field"><label for="f_grp">Group</label><input id="f_grp" name="grp" list="grplist" value="${esc(c.grp||'')}"><datalist id="grplist">${grps.map(g=>`<option value="${esc(g)}">`).join('')}</datalist></div>
+    ${F.text('details','Details',c.details)}
+    <div class="grid2">${F.sel('actual_rule','Actual counts',[['expense','Expenses in this category'],['to_account','Transfers into an account']],c.actual_rule)}${F.sel('rule_account','Account (for transfers)',['',...state.data.accounts.map(a=>a.name)],c.rule_account||'')}</div>
+    ${F.check('in_total','Part of the monthly plan total',c.in_total)}${isNew?'':F.check('active','Active',c.active)}`;
+  openModal(isNew?'Add budget category':'Edit category', html, async fd=>{
+    const pp=fd.get('per_paycheck'); const row={name:fd.get('name').trim(),monthly_target:Number(fd.get('monthly_target'))||0,per_paycheck:pp===''?null:Number(pp),grp:(fd.get('grp')||'').trim(),details:(fd.get('details')||'').trim(),actual_rule:fd.get('actual_rule'),rule_account:fd.get('rule_account')||null,in_total:!!fd.get('in_total')};
+    if (!isNew) row.active=!!fd.get('active'); else row.sort=c.sort;
+    dbErr(isNew? await sb.from('pb_categories').insert(row) : await sb.from('pb_categories').update(row).eq('id',c.id));
+    await afterSave('Saved');
+  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_categories').delete().eq('id',c.id)); await afterSave('Deleted'); } });
+}
+
+function fundForm(f){
+  const isNew=!f; f=f||{name:'',monthly_add:0,spend_categories:[],grp:'Sinking fund',notes:'',sort:(state.data.funds.length+1),active:true};
+  const html=`${F.text('name','Fund name',f.name,'required')}<div class="grid2">${F.num('monthly_add','Monthly add',f.monthly_add)}${F.sel('grp','Type',['Sinking fund','Monthly earmark'],f.grp)}</div>
+    ${F.text('spend_categories','Spending categories (comma separated)',(f.spend_categories||[]).join(', '),'placeholder="defaults to the fund name"')}${F.text('notes','Notes',f.notes)}${isNew?'':F.check('active','Active',f.active)}`;
+  openModal(isNew?'Add fund':'Edit fund', html, async fd=>{
+    const name=fd.get('name').trim(); let cats=(fd.get('spend_categories')||'').split(',').map(s=>s.trim()).filter(Boolean); if(!cats.length) cats=[name];
+    const row={name,monthly_add:Number(fd.get('monthly_add'))||0,grp:fd.get('grp'),spend_categories:cats,notes:(fd.get('notes')||'').trim()};
+    if (!isNew) row.active=!!fd.get('active'); else row.sort=f.sort;
+    dbErr(isNew? await sb.from('pb_funds').insert(row) : await sb.from('pb_funds').update(row).eq('id',f.id));
+    await afterSave('Saved');
+  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_funds').delete().eq('id',f.id)); await afterSave('Deleted'); } });
+}
+
+function accountsForm(){
+  const list=state.data.accounts;
+  const html=`<div class="sub">Edit balances by adding transactions; this only changes how each account is treated.</div>
+    <div class="scrollx"><table class="tbl"><thead><tr><th>Account</th><th>Kind</th><th>Spendable</th><th class="r">Min reserve</th></tr></thead><tbody>
+    ${list.map(a=>`<tr><td>${esc(a.name)}</td><td><select name="kind_${a.id}">${['cash','credit','excluded'].map(k=>`<option ${a.kind===k?'selected':''}>${k}</option>`).join('')}</select></td><td><input type="checkbox" name="sp_${a.id}" ${a.in_spendable?'checked':''}></td><td class="r"><input type="number" step="0.01" name="min_${a.id}" value="${num(a.min_reserve)}" style="width:90px"></td></tr>`).join('')}
+    </tbody></table></div>
+    ${F.text('newname','Add an account (name)','')}`;
+  openModal('Accounts', html, async fd=>{
+    for (const a of list){ const row={kind:fd.get('kind_'+a.id),in_spendable:!!fd.get('sp_'+a.id),min_reserve:Number(fd.get('min_'+a.id))||0};
+      if (row.kind!==a.kind||row.in_spendable!==a.in_spendable||row.min_reserve!==num(a.min_reserve)) dbErr(await sb.from('pb_accounts').update(row).eq('id',a.id)); }
+    const nn=(fd.get('newname')||'').trim(); if (nn) dbErr(await sb.from('pb_accounts').insert({name:nn,kind:'cash',in_spendable:true,sort:list.length+1}));
+    await afterSave('Accounts saved');
+  });
+}
+function accountForm(name){
+  const a=state.data.accounts.find(x=>x.name===name); if(!a) return;
+  const html=`${F.text('name','Name',a.name,'required')}${F.sel('kind','Kind',[['cash','Cash (counts in total cash)'],['credit','Credit card (debt)'],['excluded','Not counted (loan / investment)']],a.kind)}
+    <div class="grid2">${F.num('min_reserve','Minimum reserve',a.min_reserve)}<div class="field"><label>&nbsp;</label>${F.check('in_spendable','Counts as spendable',a.in_spendable)}</div></div>${F.text('notes','Notes',a.notes)}${F.check('active','Active',a.active)}`;
+  openModal('Edit account', html, async fd=>{
+    const row={name:fd.get('name').trim(),kind:fd.get('kind'),min_reserve:Number(fd.get('min_reserve'))||0,in_spendable:!!fd.get('in_spendable'),notes:(fd.get('notes')||'').trim(),active:!!fd.get('active')};
+    if (row.name!==a.name){ // keep the ledger connected when renaming
+      dbErr(await sb.from('pb_transactions').update({from_account:row.name}).eq('from_account',a.name));
+      dbErr(await sb.from('pb_transactions').update({to_account:row.name}).eq('to_account',a.name));
+      dbErr(await sb.from('pb_categories').update({rule_account:row.name}).eq('rule_account',a.name));
+    }
+    dbErr(await sb.from('pb_accounts').update(row).eq('id',a.id)); await afterSave('Saved');
+  });
+}
+function settingForm(key){
+  const s=state.data.settingsMap[key]; if(!s) return;
+  openModal(s.label, `${F.text('value','Value',s.value,'required')}${F.text('notes','Notes',s.notes)}`, async fd=>{
+    dbErr(await sb.from('pb_settings').update({value:fd.get('value').trim(),notes:(fd.get('notes')||'').trim()}).eq('key',key)); await afterSave('Saved'); });
+}
+function noteForm(n){
+  const isNew=!n; n=n||{title:'',body:'',sort:(state.data.notes.length+1)};
+  openModal(isNew?'Add note':'Edit note', `${F.text('title','Title',n.title,'required')}${F.area('body','Note',n.body)}`, async fd=>{
+    const row={title:fd.get('title').trim(),body:(fd.get('body')||'').trim()}; if(isNew) row.sort=n.sort;
+    dbErr(isNew? await sb.from('pb_notes').insert(row) : await sb.from('pb_notes').update(row).eq('id',n.id)); await afterSave('Saved');
+  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_notes').delete().eq('id',n.id)); await afterSave('Deleted'); } });
+}
+function changePassForm(){
+  openModal('Change password', `${F.text('p1','New password','','type="password" minlength="6" required autocomplete="new-password"')}${F.text('p2','Repeat it','','type="password" minlength="6" required autocomplete="new-password"')}`, async fd=>{
+    if (fd.get('p1')!==fd.get('p2')) throw new Error('Passwords do not match.');
+    const { error } = await sb.auth.updateUser({ password: fd.get('p1') }); if (error) throw new Error(error.message); toast('Password changed');
+  });
+}
+
+/* Log a paycheck: one Income row plus one allocation per planner line that maps to a fund */
+function paycheckForm(){
+  const c=state.calc, d=state.data;
+  const fundFor=cat=>{ return d.funds.find(f=>f.active&&(f.name===cat||(f.spend_categories||[]).includes(cat))); };
+  const lines=c.plan.map(p=>({...p, fund: p.actual_rule==='expense'?fundFor(p.name):null}));
+  // merge planner lines that share a fund (e.g. subscriptions)
+  const byFund={}; lines.forEach(l=>{ if(l.fund){ byFund[l.fund.name]=(byFund[l.fund.name]||0)+l.perCheck; } });
+  const transfers=lines.filter(l=>l.actual_rule==='to_account');
+  const unmapped=lines.filter(l=>l.actual_rule==='expense'&&!l.fund);
+  const html=`<div class="grid2">${F.date('date','Deposit date',todayISO())}${F.num('amount','Net amount',c.takeHome,'required')}</div>
+    ${F.sel('to_account','Deposited to',state.data.accounts.filter(a=>a.kind==='cash').map(a=>a.name),'Chase Checking')}
+    <div class="sub">This adds the paycheck as Income, then earmarks each planner line into its fund:</div>
+    <div class="scrollx"><table class="tbl"><tbody>${Object.entries(byFund).map(([f,amt])=>`<tr><td><input type="checkbox" name="fund_${esc(f)}" checked style="width:auto"> ${esc(f)}</td><td class="r num">${fmt(amt)}</td></tr>`).join('')}
+    ${transfers.map(t=>`<tr><td class="muted">${esc(t.name)} <span class="pill info">transfer</span><div class="sub">Log the ${fmt(t.perCheck)} transfer to ${esc(t.rule_account)} separately when you move it</div></td><td class="r num muted">${fmt(t.perCheck)}</td></tr>`).join('')}
+    ${unmapped.map(u=>`<tr><td class="muted">${esc(u.name)}<div class="sub">No fund with this category, so no earmark</div></td><td class="r num muted">${fmt(u.perCheck)}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  openModal('Log a paycheck', html, async fd=>{
+    const date=fd.get('date'), amount=Number(fd.get('amount'));
+    if (!(amount>0)) throw new Error('Enter the net amount.');
+    dbErr(await sb.from('pb_transactions').insert({date,from_account:'External',to_account:fd.get('to_account'),type:'Income',category:'Paycheck',amount,description:'Paycheck'}));
+    const rows=Object.entries(byFund).filter(([f])=>fd.get('fund_'+f)).map(([f,amt])=>({date,fund:f,amount:r2(amt),source:'Paycheck '+date,details:'Planner earmark'}));
+    if (rows.length) dbErr(await sb.from('pb_allocations').insert(rows));
+    await afterSave('Paycheck logged with '+rows.length+' earmarks');
+  },{saveLabel:'Log paycheck'});
+}
+
+/* ---------- Events ---------- */
+document.addEventListener('click', async e=>{
+  const tab=e.target.closest('nav.tabs button'); if (tab){ state.tab=tab.dataset.tab; try{localStorage.setItem('pb_tab',state.tab);}catch(x){} render(); window.scrollTo({top:0}); return; }
+  const go=e.target.closest('[data-tab-go]'); if (go){ state.tab=go.dataset.tabGo; render(); window.scrollTo({top:0}); return; }
+  const filt=e.target.closest('[data-filter]'); if (filt){ state.ledgerFilter=filt.dataset.filter; renderLedger(); return; }
+  const act=e.target.closest('[data-act]'); if (!act) return;
+  const d=state.data; const id=Number(act.dataset.id);
+  switch(act.dataset.act){
+    case 'add-tx': txForm(null); break;
+    case 'tx': txForm(d.transactions.find(t=>t.id===id)); break;
+    case 'add-alloc': allocForm(null); break;
+    case 'alloc': allocForm(d.allocations.find(a=>a.id===id)); break;
+    case 'add-cat': catForm(null); break;
+    case 'cat': catForm(d.categories.find(c=>c.id===id)); break;
+    case 'add-fund': fundForm(null); break;
+    case 'fund': fundForm(d.funds.find(f=>f.id===id)); break;
+    case 'edit-accounts': accountsForm(); break;
+    case 'acct': accountForm(act.dataset.name); break;
+    case 'setting': settingForm(act.dataset.key); break;
+    case 'add-note': noteForm(null); break;
+    case 'note': noteForm(d.notes.find(n=>n.id===id)); break;
+    case 'log-paycheck': paycheckForm(); break;
+    case 'change-pass': changePassForm(); break;
+    case 'signout': await sb.auth.signOut(); showAuth(); break;
+  }
+});
+$('#fab').addEventListener('click',()=>txForm(null));
+$('#prevMonth').addEventListener('click',()=>{ state.month=shiftMonth(state.month,-1); recompute(); render(); });
+$('#nextMonth').addEventListener('click',()=>{ state.month=shiftMonth(state.month,1); recompute(); render(); });
+$('#btnRefresh').addEventListener('click',()=>loadAll());
+document.addEventListener('keydown',e=>{ if (e.key==='Escape') $('#modalHost').innerHTML=''; });
+document.addEventListener('visibilitychange',()=>{ if (document.visibilityState==='visible' && state.data && !$('#appView').hidden) loadAll(); });
+
+initAuth();
+})();
+</script>
+</body>
+</html>
