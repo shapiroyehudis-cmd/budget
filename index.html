@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Hudi's Budget</title>
-<meta name="description" content="Hudi's personal budget: safe-to-spend, ledger, monthly plan, savings jars and paycheck planner, backed by Supabase.">
+<meta name="description" content="Hudi's personal budget: money in jars, bills on autopilot, paychecks split with a tap, backed by Supabase.">
 <meta name="theme-color" content="#ffd6e3">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -239,19 +239,19 @@ nav.tabs button[aria-current="page"] span.ic{background:var(--accent-soft)}
     <div id="loadMsg" class="msg" hidden></div>
     <section class="view" id="view-home"></section>
     <section class="view" id="view-activity" hidden></section>
-    <section class="view" id="view-budget" hidden></section>
     <section class="view" id="view-jars" hidden></section>
+    <section class="view" id="view-accounts" hidden></section>
     <section class="view" id="view-plan" hidden></section>
   </main>
 
-  <button class="fab" id="fab" type="button" aria-label="Add" title="Add">+</button>
+  <button class="fab" id="fab" type="button" aria-label="Log spending" title="Log spending">+</button>
 
   <nav class="tabs"><div class="row">
     <button data-tab="home" aria-current="page"><span class="ic">🏠</span>Home</button>
     <button data-tab="activity"><span class="ic">🧾</span>Activity</button>
-    <button data-tab="budget"><span class="ic">📊</span>Budget</button>
     <button data-tab="jars"><span class="ic">🫙</span>Jars</button>
-    <button data-tab="plan"><span class="ic">💸</span>Plan</button>
+    <button data-tab="accounts"><span class="ic">🏦</span>Accounts</button>
+    <button data-tab="plan"><span class="ic">💸</span>Paycheck</button>
   </div></nav>
 </div>
 
@@ -270,21 +270,20 @@ const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
 const num = v => Number(v)||0;
 const r2 = n => Math.round(n*100)/100;
 const fmt = n => { const v=r2(num(n)); const s=Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); return (v<0?'-$':'$')+s; };
-const fmt0 = n => { const v=Math.round(num(n)); return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-US'); };
 const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const todayISO = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
-const monthOf = iso => iso.slice(0,7);
+const monthOf = iso => String(iso).slice(0,7);
 const monthName = m => { const [y,mo]=m.split('-').map(Number); return new Date(y,mo-1,1).toLocaleDateString('en-US',{month:'short',year:'numeric'}); };
 const monthLong = m => { const [y,mo]=m.split('-').map(Number); return new Date(y,mo-1,1).toLocaleDateString('en-US',{month:'long'}); };
 const shiftMonth = (m,d) => { const [y,mo]=m.split('-').map(Number); const dt=new Date(y,mo-1+d,1); return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0'); };
 const dayLabel = iso => { const [y,m,d]=iso.split('-').map(Number); return new Date(y,m-1,d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); };
 const ordinal = n => { const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
 const PASTELS=['t-pink','t-lav','t-mint','t-butter','t-peach','t-sky','t-lilac'];
-const GROUP_COLORS={'Housing & bills':'var(--p-lav)','Car':'var(--p-sky)','Food':'var(--p-mint)','Home & personal':'var(--p-pink)','Subscriptions':'var(--p-lilac)','Debt & savings':'var(--p-butter)','Fun':'var(--p-peach)','Unbudgeted':'var(--surface-2)'};
-const groupColor = g => GROUP_COLORS[g] || 'var(--p-pink)';
+const GRP_COLOR={Spending:'var(--p-pink)',Bills:'var(--p-lav)',Subscriptions:'var(--p-lilac)'};
+const GROUPS=['Spending','Bills','Subscriptions'];
 
 let state = { tab:'home', month: monthOf(todayISO()), data:null, calc:null, actFilter:'all' };
-try { const t = localStorage.getItem('pb_tab2'); if (t) state.tab = t; } catch(e){}
+try { const t = localStorage.getItem('pb_tab4'); if (t) state.tab = t; } catch(e){}
 
 function toast(msg, ms=2200){ const h=$('#toastHost'); h.innerHTML=`<div class="toast">${esc(msg)}</div>`; clearTimeout(h._t); h._t=setTimeout(()=>h.innerHTML='',ms); }
 
@@ -318,326 +317,180 @@ async function loadAll(){
   const lm=$('#loadMsg'); lm.hidden=false; lm.className='msg'; lm.textContent='Loading…';
   const qs = {
     accounts: sb.from('pb_accounts').select('*').order('sort'),
+    jars: sb.from('pb_jars').select('*').order('sort'),
     transactions: sb.from('pb_transactions').select('*').order('date',{ascending:false}).order('id',{ascending:false}),
-    categories: sb.from('pb_categories').select('*').order('sort'),
-    funds: sb.from('pb_funds').select('*').order('sort'),
-    allocations: sb.from('pb_allocations').select('*').order('date',{ascending:false}).order('id',{ascending:false}),
-    settings: sb.from('pb_settings').select('*').order('sort'),
-    notes: sb.from('pb_notes').select('*').order('sort'),
-    bills: sb.from('pb_bills').select('*').order('sort'),
+    moves: sb.from('pb_jar_moves').select('*').order('date',{ascending:false}).order('id',{ascending:false}),
+    transfers: sb.from('pb_paycheck_transfers').select('*').order('sort'),
+    settings: sb.from('pb_settings').select('*'),
   };
   const keys=Object.keys(qs); const res = await Promise.all(keys.map(k=>qs[k]));
   const err = res.find(r=>r.error);
   if (err) { lm.className='msg err'; lm.textContent='Could not load: '+err.error.message; return; }
   const data={}; keys.forEach((k,i)=>data[k]=res[i].data||[]);
-  data.settingsMap = Object.fromEntries(data.settings.map(s=>[s.key, s]));
+  data.settingsMap = Object.fromEntries(data.settings.map(s=>[s.key, s.value]));
   lm.hidden=true;
   state.data=data; recompute(); render();
 }
-const setting = k => num(state.data.settingsMap[k]?.value);
+const setting = k => state.data.settingsMap[k] ?? '';
+const perCheck = j => j.per_paycheck!=null && j.per_paycheck!=='' ? num(j.per_paycheck) : r2(num(j.monthly)/2);
 
 function recompute(){
-  const d=state.data; const c={};
-  const live = d.transactions.filter(t=>!t.historical);
-  c.balance={}; d.accounts.forEach(a=>c.balance[a.name]=0);
-  live.forEach(t=>{ if (t.to_account in c.balance) c.balance[t.to_account]+=num(t.amount); if (t.from_account in c.balance) c.balance[t.from_account]-=num(t.amount); });
-  for (const k in c.balance) c.balance[k]=r2(c.balance[k]);
-  c.cashAccounts=d.accounts.filter(a=>a.kind==='cash'&&a.active);
-  c.creditAccounts=d.accounts.filter(a=>a.kind==='credit'&&a.active);
-  c.otherAccounts=d.accounts.filter(a=>a.kind==='excluded'&&a.active);
-  c.totalCash=r2(c.cashAccounts.reduce((s,a)=>s+c.balance[a.name],0));
-  c.cardDebt=r2(c.creditAccounts.reduce((s,a)=>s+Math.max(0,-c.balance[a.name]),0));
-  c.cashLessDebt=r2(c.totalCash-c.cardDebt);
-  c.reserves=r2(c.cashAccounts.filter(a=>a.in_spendable).reduce((s,a)=>s+num(a.min_reserve),0));
-  c.liquid=r2(c.cashAccounts.filter(a=>a.in_spendable).reduce((s,a)=>s+c.balance[a.name],0));
-  c.cardExcluded=setting('card_promo_excluded');
-  c.spendable=r2(c.liquid-c.reserves-(c.cardDebt-c.cardExcluded));
-  c.funds=d.funds.filter(f=>f.active).map(f=>{
-    const allocated=r2(d.allocations.filter(a=>a.fund===f.name).reduce((s,a)=>s+num(a.amount),0));
-    const cats=new Set(f.spend_categories||[]);
-    const spent=r2(live.filter(t=>cats.has(t.category)&&(t.type==='Expense'||t.type==='Refund')).reduce((s,t)=>s+(t.type==='Expense'?num(t.amount):-num(t.amount)),0));
-    return {...f, allocated, spent, balance:r2(allocated-spent)};
+  const d=state.data; const c={}; const m=state.month;
+  // Account balances: opening + ins − outs (credit cards: owed = opening + outs − ins)
+  const ins={}, outs={};
+  d.transactions.forEach(t=>{ const a=num(t.amount);
+    if (t.kind==='spend'){ outs[t.account]=(outs[t.account]||0)+a; }
+    else if (t.kind==='refund'||t.kind==='income'){ ins[t.account]=(ins[t.account]||0)+a; }
+    else if (t.kind==='transfer'){ outs[t.account]=(outs[t.account]||0)+a; if (t.to_account) ins[t.to_account]=(ins[t.to_account]||0)+a; }
   });
-  c.earmarked=r2(c.funds.reduce((s,f)=>s+f.allocated,0));
-  c.fundSpent=r2(c.funds.reduce((s,f)=>s+f.spent,0));
-  c.earmarksAvail=r2(c.earmarked-c.fundSpent);
-  c.reconDiff=r2(c.earmarksAvail-c.spendable);
-  c.balanced=Math.abs(c.reconDiff)<0.01;
-  const m=state.month; const mt=d.transactions.filter(t=>t.month===m);
-  const expenseActual=cat=>r2(mt.filter(t=>t.category===cat&&(t.type==='Expense'||t.type==='Refund')).reduce((s,t)=>s+(t.type==='Expense'?num(t.amount):-num(t.amount)),0));
-  const toAccountActual=acct=>r2(mt.filter(t=>t.to_account===acct&&(t.type==='Transfer'||t.type==='Income')).reduce((s,t)=>s+num(t.amount),0));
-  c.budget=d.categories.filter(x=>x.active).map(x=>{
-    const actual=x.actual_rule==='to_account'?toAccountActual(x.rule_account):expenseActual(x.name);
-    const target=num(x.monthly_target); const remaining=r2(target-actual);
-    return {...x, target, actual, remaining, over: remaining<-0.004};
+  c.accounts = d.accounts.filter(a=>a.active).map(a=>{ const net=(ins[a.name]||0)-(outs[a.name]||0); const balance=r2(a.kind==='credit'? num(a.opening)-net : num(a.opening)+net); return {...a, balance, usable:r2(a.kind==='credit'? -balance : balance-num(a.reserve))}; });
+  c.pot = r2(c.accounts.filter(a=>a.in_pot).reduce((s,a)=>s+a.usable,0));
+  c.cash = r2(c.accounts.filter(a=>a.kind==='cash').reduce((s,a)=>s+a.balance,0));
+  c.savings = r2(c.accounts.filter(a=>a.kind==='savings').reduce((s,a)=>s+a.balance,0));
+  c.owed = r2(c.accounts.filter(a=>a.kind==='credit').reduce((s,a)=>s+a.balance,0));
+  // Jars: opening + Σ moves
+  const mv={}; d.moves.forEach(x=>{ mv[x.jar]=(mv[x.jar]||0)+num(x.amount); });
+  const mt=d.transactions.filter(t=>monthOf(t.date)===m);
+  c.jars = d.jars.filter(j=>j.active).map((j,i)=>{
+    const spentM = r2(mt.filter(t=>t.jar===j.name).reduce((s,t)=>s+(t.kind==='spend'?num(t.amount):t.kind==='refund'?-num(t.amount):0),0));
+    const paidTx = mt.find(t=>t.kind==='spend'&&t.jar===j.name);
+    return {...j, balance:r2(num(j.opening)+(mv[j.name]||0)), perCheck:perCheck(j), spentM, paid:!!paidTx, paidAmount:paidTx?num(paidTx.amount):0, color:PASTELS[i%PASTELS.length]};
   });
-  const known=new Set(d.categories.map(x=>x.name)); known.add('Opening balance'); known.add('Paycheck');
-  const extra={}; mt.forEach(t=>{ if ((t.type==='Expense'||t.type==='Refund')&&!known.has(t.category)) extra[t.category]=(extra[t.category]||0)+(t.type==='Expense'?num(t.amount):-num(t.amount)); });
-  c.budgetExtra=Object.entries(extra).map(([name,actual])=>({name,actual:r2(actual)}));
-  c.takeHome=setting('biweekly_take_home'); c.dad=setting('dad_monthly');
-  c.monthIncome=r2(c.takeHome*2+c.dad);
-  c.totalAllocated=r2(c.budget.filter(b=>b.in_total).reduce((s,b)=>s+b.target,0));
-  c.cushion=r2(c.monthIncome-c.totalAllocated);
-  c.monthSpent=r2(c.budget.filter(b=>b.actual_rule==='expense').reduce((s,b)=>s+b.actual,0)+c.budgetExtra.reduce((s,b)=>s+b.actual,0));
-  c.monthPlannedSpend=r2(c.budget.filter(b=>b.in_total&&b.actual_rule==='expense').reduce((s,b)=>s+b.target,0));
-  c.monthIncomeActual=r2(mt.filter(t=>t.type==='Income'&&!t.historical).reduce((s,t)=>s+num(t.amount),0));
-  c.plan=c.budget.filter(b=>b.in_total&&b.target>0).map(b=>({...b, perCheck: b.per_paycheck!=null?num(b.per_paycheck):r2(b.target/2)}));
-  c.planTotal=r2(c.plan.reduce((s,p)=>s+p.perCheck,0));
-  c.planGap=r2(c.takeHome-c.planTotal);
-  const hysa=d.accounts.find(a=>/hysa/i.test(a.name)); c.hysaName=hysa?hysa.name:null; c.hysaBal=hysa?c.balance[hysa.name]:0;
-  const hysaCat=d.categories.find(x=>x.actual_rule==='to_account'&&x.rule_account===c.hysaName); c.hysaMonthly=hysaCat?num(hysaCat.monthly_target):0;
-  c.hysa12=r2(c.hysaBal+12*c.hysaMonthly);
-  c.extraCheck=setting('extra_paycheck_estimate'); c.afterPayoff=r2(c.extraCheck-c.cardExcluded);
-  c.roth=r2(live.filter(t=>t.to_account==='Roth IRA'&&t.type==='Transfer').reduce((s,t)=>s+num(t.amount),0));
-  c.commissionNet=r2(live.filter(t=>t.type==='Income'&&/commission/i.test(t.category)).reduce((s,t)=>s+num(t.amount),0));
-  c.tdSavingsNet=r2(c.balance['TD Savings']||0);
-  // Jars split + the health check
-  c.jarsSpending=r2(c.funds.filter(f=>f.grp==='Sinking fund').reduce((s,f)=>s+f.balance,0));
-  c.jarsBills=r2(c.funds.filter(f=>f.grp!=='Sinking fund').reduce((s,f)=>s+f.balance,0));
-  c.unassigned=r2(c.spendable-c.earmarksAvail);
-  // Week + pacing
-  const today=todayISO(); const curMonth=monthOf(today);
-  c.isCurrentMonth=(m===curMonth);
-  const [yy,mm]=m.split('-').map(Number); const daysInMonth=new Date(yy,mm,0).getDate();
-  c.daysLeft=c.isCurrentMonth?Math.max(1,daysInMonth-Number(today.slice(8))+1):(m<curMonth?0:daysInMonth);
-  const tnow=new Date(); const dow=(tnow.getDay()+6)%7; const wkStart=new Date(tnow.getFullYear(),tnow.getMonth(),tnow.getDate()-dow); const wkEnd=new Date(wkStart.getFullYear(),wkStart.getMonth(),wkStart.getDate()+6);
-  const iso=dt=>dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
-  c.weekStart=iso(wkStart); c.weekEnd=iso(wkEnd);
-  c.weekSpent=r2(d.transactions.filter(t=>t.date>=c.weekStart&&t.date<=c.weekEnd&&(t.type==='Expense'||t.type==='Refund')).reduce((s,t)=>s+(t.type==='Expense'?num(t.amount):-num(t.amount)),0));
-  c.billCats=new Set((d.bills||[]).filter(b=>b.active).map(b=>b.category));
-  c.pace=c.budget.filter(b=>b.actual_rule==='expense'&&b.target>0&&!c.billCats.has(b.name)&&['Food','Home & personal'].includes(b.grp)).map(b=>({...b, perDay: c.daysLeft>0?r2(b.remaining/c.daysLeft):0}));
-  // Bills for the viewed month
-  c.bills=(d.bills||[]).filter(b=>b.active).map(b=>{ const paid=mt.find(t=>t.type==='Expense'&&t.category===b.category); return {...b, paid:!!paid, paidAmount:paid?num(paid.amount):0}; });
-  // Trends: spending per month, and last month per category
-  const byMonth={}; d.transactions.forEach(t=>{ if(t.type==='Expense'||t.type==='Refund') byMonth[t.month]=(byMonth[t.month]||0)+(t.type==='Expense'?num(t.amount):-num(t.amount)); });
-  c.trend=Object.keys(byMonth).sort().map(k=>({month:k,total:r2(byMonth[k])}));
-  const prevM=shiftMonth(m,-1); const pt=d.transactions.filter(t=>t.month===prevM);
-  c.prevActual={}; c.budget.forEach(b=>{ c.prevActual[b.name]=b.actual_rule==='to_account'?r2(pt.filter(t=>t.to_account===b.rule_account&&(t.type==='Transfer'||t.type==='Income')).reduce((s,t)=>s+num(t.amount),0)):r2(pt.filter(t=>t.category===b.name&&(t.type==='Expense'||t.type==='Refund')).reduce((s,t)=>s+(t.type==='Expense'?num(t.amount):-num(t.amount)),0)); });
-  c.prevMonthHasData=pt.length>0; c.prevMonth=prevM;
-  c.movers=c.prevMonthHasData?c.budget.filter(b=>b.actual_rule==='expense').map(b=>({name:b.name,now:b.actual,prev:c.prevActual[b.name],diff:r2(b.actual-c.prevActual[b.name])})).filter(x=>Math.abs(x.diff)>0.004).sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff)).slice(0,5):[];
-  // Paycheck transfers
-  c.planTransfers=c.plan.filter(p=>p.actual_rule==='to_account'&&p.rule_account);
-  // Month close
-  const lastClosed=(d.settingsMap.last_closed_month?.value||'');
-  c.monthClosed=!!lastClosed&&m<=lastClosed;
-  c.canClose=!c.monthClosed&&(m<curMonth||(c.isCurrentMonth&&c.daysLeft<=3))&&live.some(t=>t.month===m);
-  c.whatever=c.funds.find(f=>/whatever/i.test(f.name));
-  c.closeMoves=[]; if(c.whatever){ c.funds.filter(f=>!f.rollover&&f.name!==c.whatever.name&&f.balance>0.004).forEach(f=>c.closeMoves.push({from:f.name,amount:f.balance})); if(c.unassigned>0.004) c.closeMoves.push({from:null,amount:c.unassigned}); }
+  c.jarsTotal = r2(c.jars.reduce((s,j)=>s+j.balance,0));
+  c.spendingTotal = r2(c.jars.filter(j=>j.grp==='Spending').reduce((s,j)=>s+j.balance,0));
+  c.setAside = r2(c.jarsTotal - c.spendingTotal);
+  c.unassigned = r2(c.pot - c.jarsTotal);
+  c.bills = c.jars.filter(j=>j.grp!=='Spending');
+  c.unpaid = c.bills.filter(b=>!b.paid && num(b.monthly)>0);
+  c.spentM = r2(mt.filter(t=>t.kind==='spend').reduce((s,t)=>s+num(t.amount),0) - mt.filter(t=>t.kind==='refund').reduce((s,t)=>s+num(t.amount),0));
+  c.incomeM = r2(mt.filter(t=>t.kind==='income').reduce((s,t)=>s+num(t.amount),0));
+  c.transfersPlan = d.transfers.filter(t=>t.active);
+  c.perCheckJars = r2(c.jars.reduce((s,j)=>s+j.perCheck,0));
+  c.perCheckTransfers = r2(c.transfersPlan.reduce((s,t)=>s+num(t.amount),0));
+  c.paycheck = num(setting('paycheck_amount'));
+  c.leftover = r2(c.paycheck - c.perCheckJars - c.perCheckTransfers);
+  c.isCurrentMonth = m===monthOf(todayISO());
   state.calc=c;
 }
 
 /* ---------- Render ---------- */
 function render(){
+  $('#monthLabel').textContent = monthName(state.month);
   $$('nav.tabs button').forEach(b=>b.setAttribute('aria-current', b.dataset.tab===state.tab?'page':'false'));
-  ['home','activity','budget','jars','plan'].forEach(v=>$('#view-'+v).hidden=v!==state.tab);
-  $('#monthLabel').textContent=monthName(state.month);
-  if (!state.calc) return;
-  renderHome(); renderActivity(); renderBudget(); renderJars(); renderPlan();
+  $$('section.view').forEach(s=>s.hidden = s.id!=='view-'+state.tab);
+  ({home:renderHome, activity:renderActivity, jars:renderJars, accounts:renderAccounts, plan:renderPlan})[state.tab]();
+  window.scrollTo({top:0});
 }
-
+const jarName = j => j.name;
+function jarCard(j){
+  const sub = j.grp==='Spending' ? (j.perCheck?`+${fmt(j.perCheck)} per check`:'no auto top-up') : `${fmt(j.monthly)} a month`;
+  return `<div class="jar ${j.color}" data-act="jar" data-id="${j.id}" role="button" tabindex="0"><div class="n">${esc(j.name)}</div><div class="v num ${j.balance<0?'neg':''}">${fmt(j.balance)}</div><div class="sub">${esc(sub)}</div></div>`;
+}
+function healthPill(c){
+  if (Math.abs(c.unassigned)<0.005) return `<span class="pill ok">Every dollar is in a jar</span>`;
+  if (c.unassigned>0) return `<span class="pill info">${fmt(c.unassigned)} not in a jar yet</span>`;
+  return `<span class="pill over">Jars are ${fmt(-c.unassigned)} more than you have</span>`;
+}
 function renderHome(){
-  const c=state.calc, d=state.data; const el=$('#view-home');
-  const over=c.budget.filter(b=>b.over);
-  const spentPct=c.monthPlannedSpend>0?Math.min(100,c.monthSpent/c.monthPlannedSpend*100):0;
-  const top=c.budget.filter(b=>b.actual_rule==='expense'&&(b.target>0||b.actual>0)).sort((a,b)=>(b.actual/(b.target||1))-(a.actual/(a.target||1))).slice(0,5);
-  const jars=c.funds.filter(f=>f.grp==='Sinking fund').slice(0,6);
-  const due=c.bills.filter(b=>!b.paid);
-  const okUn=Math.abs(c.unassigned)<0.01;
-  el.innerHTML=`
+  const c=state.calc; const v=$('#view-home');
+  const billsHTML = c.unpaid.length
+    ? `<div class="rows">${c.unpaid.map(b=>`<div class="row-item"><div class="t">${esc(b.name)}</div><div class="d">${b.day_of_month?'Due the '+ordinal(b.day_of_month)+' · ':''}${esc(b.grp)}${b.balance<num(b.monthly)-0.005?' · jar has '+fmt(b.balance):''}</div><div class="a"><button class="btn sm primary" data-act="pay" data-id="${b.id}">Paid ${fmt(b.monthly)}</button></div></div>`).join('')}</div>`
+    : `<div class="empty">All bills logged for ${monthLong(state.month)} 🎉</div>`;
+  const top = c.jars.filter(j=>j.grp==='Spending'&&j.spentM>0).sort((a,b)=>b.spentM-a.spentM).slice(0,4);
+  v.innerHTML = `
   <div class="hero">
     <div class="eyebrow">In your spending jars</div>
-    <div class="big ${c.jarsSpending<0?'neg':''}">${fmt(c.jarsSpending)}</div>
-    <div class="line"><span>Bills &amp; rent set aside ${fmt0(c.jarsBills)}</span><span class="pill ${okUn?'ok':'over'}">${okUn?'✓ Every dollar has a jar':(c.unassigned>0?fmt(c.unassigned)+' unassigned':fmt(-c.unassigned)+' spent outside jars')}</span></div>
+    <div class="big num ${c.spendingTotal<0?'neg':''}">${fmt(c.spendingTotal)}</div>
+    <div class="line"><span>Bills & subscriptions set aside ${fmt(c.setAside)}</span></div>
+    <div class="line">${healthPill(c)}</div>
   </div>
   <div class="quick">
-    <button class="spent" data-act="add-kind" data-kind="spent"><span class="ic">🛍️</span>I spent</button>
-    <button class="paid" data-act="add-kind" data-kind="paid"><span class="ic">💗</span>I got paid</button>
-    <button class="moved" data-act="add-kind" data-kind="moved"><span class="ic">🔁</span>I moved money</button>
+    <button class="spent" data-act="spent"><span class="ic">🛍️</span>Spent</button>
+    <button class="paid" data-act="paid"><span class="ic">💖</span>Got paid</button>
+    <button class="moved" data-act="moved"><span class="ic">🔀</span>Moved</button>
   </div>
-  ${c.canClose?`<div class="card tint" style="background:var(--p-lav)"><div class="card-head"><h2>Close out ${esc(monthLong(state.month))}?</h2><button class="btn primary sm" data-act="close-month">Close month</button></div><div class="sub">Sweeps unused electricity and waxing money${c.unassigned>0.004?' and '+fmt(c.unassigned)+' of unassigned cash':''} into Whatever. Every other jar keeps its balance.</div></div>`:''}
-  <div class="tiles">
-    <div class="tile t-mint"><div class="eyebrow">Cash total</div><div class="v">${fmt0(c.totalCash)}</div><div class="sub">incl. savings</div></div>
-    <div class="tile t-sky"><div class="eyebrow">Savings</div><div class="v">${fmt0(c.hysaBal)}</div><div class="sub">${esc(c.hysaName||'HYSA')}</div></div>
-    <div class="tile t-peach"><div class="eyebrow">Cards owed</div><div class="v ${c.cardDebt>c.cardExcluded+0.004?'neg':''}">${fmt0(c.cardDebt)}</div><div class="sub">${fmt0(c.cardExcluded)} covered by Dec check</div></div>
-    <div class="tile t-butter"><div class="eyebrow">${esc(monthLong(state.month))} spent</div><div class="v">${fmt0(c.monthSpent)}</div><div class="sub">of ${fmt0(c.monthPlannedSpend)} planned${over.length?' · <span class="pill over">'+over.length+' over</span>':''}</div><div class="bar" style="margin-top:8px"><i class="${spentPct>=100?'over':''}" style="width:${spentPct}%"></i></div></div>
-  </div>
-  ${due.length?`<div class="card"><div class="card-head"><h2>Bills to log</h2><span class="sub">${esc(monthName(state.month))}</span></div><div class="rows">${due.map(b=>`<div class="row-item"><div class="t">${esc(b.name)}</div><div class="d">${b.day_of_month?'Around the '+ordinal(b.day_of_month):'Sometime this month'}${b.notes?' · '+esc(b.notes):''}</div><div class="a"><button class="btn primary sm" data-act="pay-bill" data-id="${b.id}">Paid ${fmt0(b.amount)}</button></div></div>`).join('')}</div><div class="sub" style="margin-top:8px">Tap Paid, check the amount, save. Edit the list under Plan.</div></div>`:`<div class="card tint" style="background:var(--p-mint)"><div style="font-weight:800">✓ All ${esc(monthLong(state.month))} bills are logged</div></div>`}
-  ${c.isCurrentMonth?`<div class="card"><div class="card-head"><h2>This week</h2><span class="sub">${esc(dayLabel(c.weekStart))} to ${esc(dayLabel(c.weekEnd))}</span></div>
-    <div class="tiles" style="grid-template-columns:repeat(2,1fr);margin-bottom:8px"><div class="tile t-pink"><div class="eyebrow">Spent this week</div><div class="v">${fmt(c.weekSpent)}</div></div><div class="tile t-lilac"><div class="eyebrow">Days left in ${esc(monthLong(state.month))}</div><div class="v">${c.daysLeft}</div></div></div>
-    <div class="rows">${c.pace.slice(0,6).map(p=>`<div class="row-item click" data-act="cat" data-id="${p.id}"><div class="t">${esc(p.name)}</div><div class="d">${p.remaining<0?'over by '+fmt(-p.remaining):fmt(p.remaining)+' left this month'}</div><div class="a ${p.remaining<0?'':'in'}" style="${p.remaining<0?'color:var(--warn)':''}">${fmt(Math.max(0,p.perDay))}<span class="sub">a day</span></div></div>`).join('')}</div></div>`:''}
-  <div class="card">
-    <div class="card-head"><h2>Where ${esc(monthLong(state.month))} is going</h2><button class="btn sm" data-tab-go="budget">See all</button></div>
-    ${budgetRows(top,true)}
-  </div>
-  <div class="card">
-    <div class="card-head"><h2>Your jars</h2><button class="btn sm" data-tab-go="jars">All jars</button></div>
-    <div class="jars">${jars.map((f,i)=>jarCard(f,i)).join('')}</div>
-  </div>
-  <div class="card">
-    <div class="card-head"><h2>Accounts</h2><button class="btn sm" data-act="edit-accounts">Edit</button></div>
-    <div class="rows">
-      ${c.cashAccounts.map(a=>`<div class="row-item click" data-act="acct" data-name="${esc(a.name)}"><div class="t">${esc(a.name)}</div><div class="d">${esc(a.notes||'')}</div><div class="a">${fmt(c.balance[a.name])}</div></div>`).join('')}
-      ${c.creditAccounts.filter(a=>Math.abs(c.balance[a.name])>0.004||/sapphire|active cash/i.test(a.name)).map(a=>`<div class="row-item click" data-act="acct" data-name="${esc(a.name)}"><div class="t">${esc(a.name)} <span class="pill info">card</span></div><div class="d">${esc(a.notes||'')}</div><div class="a xfer">${fmt(Math.max(0,-c.balance[a.name]))}<span class="sub">owed</span></div></div>`).join('')}
-      ${c.otherAccounts.map(a=>`<div class="row-item click" data-act="acct" data-name="${esc(a.name)}"><div class="t">${esc(a.name)} <span class="pill hist">not counted</span></div><div class="d">${esc(a.notes||'')}</div><div class="a xfer">${fmt(c.balance[a.name])}<span class="sub">net moved</span></div></div>`).join('')}
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-head"><h2>Recent</h2><button class="btn sm" data-tab-go="activity">All activity</button></div>
-    ${txRows(d.transactions.slice(0,5))}
+  <div class="card"><div class="card-head"><h2>Bills to log · ${esc(monthLong(state.month))}</h2></div>${billsHTML}</div>
+  <div class="card"><div class="card-head"><h2>Spending jars</h2><div class="actions"><button class="btn sm" data-tab-go="jars">All jars</button></div></div>
+    <div class="jars">${c.jars.filter(j=>j.grp==='Spending').map(jarCard).join('')}</div></div>
+  <div class="card"><div class="card-head"><h2>${esc(monthLong(state.month))} so far</h2><span class="num">${fmt(c.spentM)} spent</span></div>
+    ${top.length?`<div class="rows">${top.map(j=>`<div class="row-item"><div class="t">${esc(j.name)}</div><div class="d">${fmt(j.balance)} left in the jar</div><div class="a">${fmt(j.spentM)}</div></div>`).join('')}</div>`:`<div class="empty">Nothing logged yet this month.</div>`}
   </div>`;
 }
-
-function jarCard(f,i){
-  const pct=f.allocated>0?Math.min(100,Math.max(0,f.balance/f.allocated*100)):0;
-  return `<div class="jar ${PASTELS[i%PASTELS.length]}" data-act="fund" data-id="${f.id}"><div class="n">${esc(f.name)}</div><div class="v ${f.balance<0?'neg':''}">${fmt(f.balance)}</div><div class="fill"><i style="width:${pct}%"></i></div><div class="sub">${f.spent>0?fmt0(f.spent)+' used of '+fmt0(f.allocated):(num(f.monthly_add)>0?'+'+fmt0(f.monthly_add)+' a month':'saved up')}</div></div>`;
-}
-
-function budgetRows(rows, compact){
-  if (!rows.length) return '<div class="empty">Nothing here yet.</div>';
-  return `<div class="rows">${rows.map(b=>{
-    const pct=b.target>0?Math.min(100,Math.max(0,b.actual/b.target*100)):(b.actual>0?100:0);
-    return `<div class="row-item click" data-act="cat" data-id="${b.id}"><div class="t">${esc(b.name)}${b.actual_rule==='to_account'?' <span class="pill info">transfer</span>':''}${b.over?' <span class="pill over">over</span>':''}</div>
-      <div class="d">${compact?'':esc(b.details||'')}${b.target>0?(compact?'':' · ')+fmt(b.remaining)+' left':''}${!compact&&state.calc.prevMonthHasData?' · last month '+fmt(state.calc.prevActual[b.name]||0):''}</div>
-      <div class="a">${fmt(b.actual)}<span class="sub">of ${fmt0(b.target)}</span></div>
-      <div class="bar"><i class="${b.over?'over':''}" style="width:${pct}%"></i></div></div>`;}).join('')}</div>`;
-}
-
-function txRows(list){
-  if (!list.length) return '<div class="empty">Nothing logged yet. Tap + to add something.</div>';
-  let out='', lastDay='';
-  list.forEach(t=>{
-    if (t.date!==lastDay){ out+=`<div class="daysep">${esc(dayLabel(t.date))}</div>`; lastDay=t.date; }
-    const dir=t.type==='Income'||t.type==='Refund'?'in':(t.type==='Transfer'||t.type==='Opening'?'xfer':'out');
-    const sign=dir==='in'?'+':(dir==='out'?'−':'');
-    const who=t.type==='Expense'?`${t.from_account}`:(t.type==='Income'||t.type==='Refund'?`into ${t.to_account}`:`${t.from_account} → ${t.to_account}`);
-    out+=`<div class="row-item click" data-act="tx" data-id="${t.id}"><div class="t">${esc(t.category||t.type)}${t.historical?' <span class="pill hist">history</span>':''}</div><div class="d">${esc(who)}${t.description?' · '+esc(t.description):''}</div><div class="a ${dir}">${sign}${fmt(num(t.amount))}</div></div>`;
+function activityItems(){
+  const d=state.data; const m=state.month;
+  const accByName=Object.fromEntries(state.calc.accounts.map(a=>[a.name,a]));
+  const items=[];
+  d.transactions.filter(t=>monthOf(t.date)===m).forEach(t=>{
+    const base={date:t.date, id:'t'+t.id, created:t.created_at, raw:t, type:'tx'};
+    if (t.kind==='spend') items.push({...base, k:'spent', title:t.note||t.jar||'Spent', sub:`${t.jar||'No jar'} · ${t.account}`, amount:-num(t.amount)});
+    else if (t.kind==='refund') items.push({...base, k:'spent', title:t.note||'Refund', sub:`Refund to ${t.jar||'no jar'} · ${t.account}`, amount:num(t.amount), cls:'in'});
+    else if (t.kind==='income'){ const n=d.moves.filter(x=>x.tx_id===t.id).length; items.push({...base, k:'paid', title:t.note||'Paycheck', sub:`${t.account}${n?' · split into '+n+(n===1?' jar':' jars'):''}`, amount:num(t.amount), cls:'in'}); }
+    else items.push({...base, k:'moved', title:t.note||`${t.account} → ${t.to_account}`, sub:(accByName[t.to_account]?.kind==='credit'?'Card payment':'Transfer')+` · ${t.account} → ${t.to_account}`, amount:num(t.amount), cls:'xfer'});
   });
-  return `<div class="rows">${out}</div>`;
+  d.moves.filter(x=>!x.tx_id && monthOf(x.date)===m).forEach(x=>items.push({date:x.date, id:'m'+x.id, created:x.created_at, raw:x, type:'move', k:'moved', title:x.note||(num(x.amount)>=0?'Added to '+x.jar:'Taken from '+x.jar), sub:`Jar: ${x.jar}`, amount:num(x.amount), cls:'xfer'}));
+  items.sort((a,b)=> a.date<b.date?1:a.date>b.date?-1:(a.created<b.created?1:-1));
+  return items;
 }
-
 function renderActivity(){
-  const d=state.data; const el=$('#view-activity');
-  const f=state.actFilter; let list=d.transactions;
-  if (f==='month') list=list.filter(t=>t.month===state.month);
-  else if (f==='expense') list=list.filter(t=>t.type==='Expense'||t.type==='Refund');
-  else if (f==='transfer') list=list.filter(t=>t.type==='Transfer'||t.type==='Opening');
-  else if (f==='income') list=list.filter(t=>t.type==='Income');
-  const inM=d.transactions.filter(t=>t.month===state.month);
-  const spent=r2(inM.filter(t=>t.type==='Expense').reduce((s,t)=>s+num(t.amount),0)-inM.filter(t=>t.type==='Refund').reduce((s,t)=>s+num(t.amount),0));
-  const income=r2(inM.filter(t=>t.type==='Income').reduce((s,t)=>s+num(t.amount),0));
-  el.innerHTML=`
-  <div class="tiles" style="grid-template-columns:repeat(2,1fr)">
-    <div class="tile t-pink"><div class="eyebrow">${esc(monthName(state.month))} spent</div><div class="v">${fmt(spent)}</div></div>
-    <div class="tile t-mint"><div class="eyebrow">${esc(monthName(state.month))} in</div><div class="v">${fmt(income)}</div></div>
-  </div>
-  <div class="card">
-    <div class="card-head"><h2>Activity</h2><button class="btn primary sm" data-act="add-kind" data-kind="spent">+ Add</button></div>
-    <div class="toggle" role="group" aria-label="Filter">
-      ${[['all','All'],['month',monthName(state.month)],['expense','Spending'],['income','Income'],['transfer','Transfers']].map(([k,l])=>`<button type="button" data-filter="${k}" aria-pressed="${f===k}">${esc(l)}</button>`).join('')}
-    </div>
-    <div style="margin-top:6px">${txRows(list.slice(0,300))}</div>${list.length>300?`<div class="sub">Showing the latest 300 of ${list.length}.</div>`:''}
-  </div>`;
-}
-
-function trendChart(){
-  const c=state.calc; const t=c.trend; if (t.length<2) return `<div class="empty">Trends show up once more than one month of spending is logged.</div>`;
-  const W=560,H=210,padL=8,padR=8,padT=30,padB=30; const max=Math.max(...t.map(x=>x.total),1);
-  const n=t.length; const slot=(W-padL-padR)/n; const bw=Math.min(48,slot*0.6);
-  const bars=t.map((x,i)=>{ const h=Math.max(3,(H-padT-padB)*x.total/max); const xx=padL+i*slot+(slot-bw)/2; const y=H-padB-h; const cur=x.month===state.month;
-    return `<g><title>${esc(monthName(x.month))}: ${fmt(x.total)}</title><rect x="${xx}" y="${y}" width="${bw}" height="${h}" rx="4" fill="${cur?'var(--accent)':'var(--accent-soft)'}" stroke="var(--surface)" stroke-width="2"/><text x="${xx+bw/2}" y="${y-8}" text-anchor="middle" font-size="12" font-weight="800" fill="var(--fg)">${fmt0(x.total)}</text><text x="${xx+bw/2}" y="${H-9}" text-anchor="middle" font-size="12" font-weight="700" fill="var(--muted)">${esc(monthName(x.month))}</text></g>`; }).join('');
-  const grid=[0.5,1].map(f=>{ const y=H-padB-(H-padT-padB)*f; return `<line x1="${padL}" x2="${W-padR}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`; }).join('');
-  return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Spending by month">${grid}<line x1="${padL}" x2="${W-padR}" y1="${H-padB}" y2="${H-padB}" stroke="var(--line)" stroke-width="2"/>${bars}</svg></div>`;
-}
-
-function renderBudget(){
-  const c=state.calc; const el=$('#view-budget');
-  const groups=[...new Set(c.budget.map(b=>b.grp||'Other'))];
-  el.innerHTML=`
+  const v=$('#view-activity'); const c=state.calc;
+  const items=activityItems().filter(i=>state.actFilter==='all'||i.k===state.actFilter);
+  let html='', lastDay='';
+  items.forEach(i=>{ if (i.date!==lastDay){ html+=`<div class="daysep">${esc(dayLabel(i.date))}</div>`; lastDay=i.date; }
+    html+=`<div class="row-item click" data-act="edit" data-id="${i.id}"><div class="t">${esc(i.title)}</div><div class="d">${esc(i.sub)}</div><div class="a ${i.cls||''}">${i.amount<0?'-':i.cls==='in'?'+':''}${fmt(Math.abs(i.amount))}</div></div>`; });
+  v.innerHTML=`
   <div class="tiles three">
-    <div class="tile t-mint"><div class="eyebrow">Money in</div><div class="v">${fmt0(c.monthIncome)}</div><div class="sub">2 checks + dad</div></div>
-    <div class="tile t-lav"><div class="eyebrow">Planned</div><div class="v">${fmt0(c.totalAllocated)}</div><div class="sub">${fmt(c.cushion)} wiggle room</div></div>
-    <div class="tile t-pink"><div class="eyebrow">${esc(monthName(state.month))} actual</div><div class="v">${fmt0(c.monthSpent)}</div><div class="sub">${fmt0(c.monthIncomeActual)} income logged</div></div>
+    <div class="tile t-pink"><div class="sub">Spent</div><div class="v num">${fmt(c.spentM)}</div></div>
+    <div class="tile t-mint"><div class="sub">Paychecks</div><div class="v num">${fmt(c.incomeM)}</div></div>
+    <div class="tile t-lav"><div class="sub">In jars now</div><div class="v num">${fmt(c.jarsTotal)}</div></div>
   </div>
-  ${c.canClose?`<div class="card tint" style="background:var(--p-lav)"><div class="card-head"><h2>Close out ${esc(monthLong(state.month))}?</h2><button class="btn primary sm" data-act="close-month">Close month</button></div><div class="sub">Sweeps unused electricity and waxing money into Whatever. Everything else rolls over.</div></div>`:(c.monthClosed?`<div class="sub">✓ ${esc(monthName(state.month))} is closed.</div>`:'')}
-  <div class="card">
-    <div class="card-head"><h2>Plan vs. real</h2><button class="btn sm" data-act="add-cat">+ Category</button></div>
-    ${groups.map(g=>`<div class="group-title"><span class="dot" style="background:${groupColor(g)}"></span>${esc(g)}</div>`+budgetRows(c.budget.filter(b=>(b.grp||'Other')===g),false)).join('')}
-    ${c.budgetExtra.length?`<div class="group-title"><span class="dot" style="background:var(--surface-2)"></span>Not in the plan</div><div class="rows">`+c.budgetExtra.map(b=>`<div class="row-item"><div class="t">${esc(b.name)}</div><div class="d">Logged without a budget line</div><div class="a">${fmt(b.actual)}</div></div>`).join('')+'</div>':''}
-    <div class="sub" style="margin-top:12px">Tap a line to change its target. Transfer lines count money moved into that account this month.</div>
-  </div>
-  <div class="card">
-    <div class="card-head"><h2>Trends</h2><span class="sub">Spending by month</span></div>
-    ${trendChart()}
-    ${c.movers.length?`<div class="group-title" style="margin-top:10px">Biggest changes vs ${esc(monthName(c.prevMonth))}</div><div class="rows">${c.movers.map(x=>`<div class="row-item"><div class="t">${esc(x.name)}</div><div class="d">${fmt(x.prev)} → ${fmt(x.now)}</div><div class="a" style="${x.diff>0?'color:var(--warn)':'color:var(--ok)'}">${x.diff>0?'+':'−'}${fmt(Math.abs(x.diff))}</div></div>`).join('')}</div>`:''}
+  <div class="card"><div class="card-head"><h2>${esc(monthName(state.month))}</h2>
+    <div class="chips">${[['all','All'],['spent','Spent'],['paid','Paid'],['moved','Moved']].map(([k,l])=>`<button class="chip" data-filter="${k}" aria-pressed="${state.actFilter===k}">${l}</button>`).join('')}</div></div>
+    ${html||'<div class="empty">Nothing here yet. Tap + to log something.</div>'}
   </div>`;
 }
-
 function renderJars(){
-  const c=state.calc, d=state.data; const el=$('#view-jars');
-  const sinking=c.funds.filter(f=>f.grp==='Sinking fund'), monthly=c.funds.filter(f=>f.grp!=='Sinking fund');
-  el.innerHTML=`
-  <div class="hero" style="background:linear-gradient(135deg,var(--p-mint),var(--p-sky))">
-    <div class="eyebrow">Set aside in jars</div>
-    <div class="big">${fmt(c.earmarksAvail)}</div>
-    <div class="line"><span class="pill ${c.balanced?'ok':'over'}">${c.balanced?'✓ Matches your cash':'Off by '+fmt(c.reconDiff)}</span><span>${fmt0(c.earmarked)} put in, ${fmt0(c.fundSpent)} used</span></div>
+  const v=$('#view-jars'); const c=state.calc;
+  v.innerHTML=`
+  <div class="tiles three">
+    <div class="tile t-pink"><div class="sub">Spending jars</div><div class="v num">${fmt(c.spendingTotal)}</div></div>
+    <div class="tile t-lav"><div class="sub">Bills & subs</div><div class="v num">${fmt(c.setAside)}</div></div>
+    <div class="tile ${c.unassigned<-0.005?'t-peach':'t-mint'}"><div class="sub">Not in a jar</div><div class="v num ${c.unassigned<-0.005?'neg':''}">${fmt(c.unassigned)}</div></div>
   </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="add-alloc">+ Put money in a jar</button><button class="btn" data-act="add-fund">+ New jar</button></div>
-  <div class="card"><div class="card-head"><h2>Savings jars</h2></div><div class="jars">${sinking.map((f,i)=>jarCard(f,i)).join('')}</div></div>
-  <div class="card"><div class="card-head"><h2>Bills set aside</h2></div><div class="jars">${monthly.map((f,i)=>jarCard(f,i+3)).join('')}</div>
-    <div class="sub" style="margin-top:10px">A jar goes down when you log spending in its category. Tap a jar to rename it or change what counts.</div></div>
-  <div class="card">
-    <div class="card-head"><h2>Jar history</h2></div>
-    ${d.allocations.length?`<div class="rows">${d.allocations.slice(0,150).map(a=>`<div class="row-item click" data-act="alloc" data-id="${a.id}"><div class="t">${esc(a.fund)}</div><div class="d">${esc(dayLabel(a.date))}${a.source?' · '+esc(a.source):''}</div><div class="a ${num(a.amount)<0?'':'in'}">${num(a.amount)<0?'':'+'}${fmt(a.amount)}</div></div>`).join('')}</div>`:'<div class="empty">Nothing yet.</div>'}
-  </div>`;
+  ${GROUPS.map(g=>{ const list=c.jars.filter(j=>j.grp===g); return `<div class="card"><div class="card-head"><h2>${esc(g)}</h2><span class="num">${fmt(list.reduce((s,j)=>s+j.balance,0))}</span></div>
+    <div class="rows">${list.map(j=>`<div class="row-item click" data-act="jar" data-id="${j.id}"><div class="t">${esc(j.name)}</div><div class="d">${g==='Spending'?(j.perCheck?'+'+fmt(j.perCheck)+' per check':'no auto top-up'):fmt(j.monthly)+' a month'+(j.day_of_month?' · due the '+ordinal(j.day_of_month):'')}${j.notes?' · '+esc(j.notes):''}</div><div class="a ${j.balance<0?'':''}" style="${j.balance<0?'color:var(--warn)':''}">${fmt(j.balance)}</div></div>`).join('')||'<div class="empty">No jars here.</div>'}</div>
+    </div>`; }).join('')}
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="new-jar">+ New jar</button><button class="btn" data-act="moved">Move between jars</button><button class="btn" data-act="adjust">Adjust a jar</button></div>`;
 }
-
+function renderAccounts(){
+  const v=$('#view-accounts'); const c=state.calc;
+  const sect=(title,kind,label)=>{ const list=c.accounts.filter(a=>a.kind===kind); if(!list.length) return ''; return `<div class="card"><div class="card-head"><h2>${title}</h2><span class="num">${fmt(list.reduce((s,a)=>s+a.balance,0))}</span></div><div class="rows">${list.map(a=>`<div class="row-item click" data-act="account" data-id="${a.id}"><div class="t">${esc(a.name)}</div><div class="d">${a.in_pot?'In the pot':'Not in the pot'}${num(a.reserve)?' · keep '+fmt(a.reserve):''}${a.notes?' · '+esc(a.notes):''}</div><div class="a" ${kind==='credit'&&a.balance>0?'style="color:var(--warn)"':''}>${fmt(a.balance)}${label?`<span class="sub">${label}</span>`:''}</div></div>`).join('')}</div></div>`; };
+  v.innerHTML=`
+  <div class="tiles three">
+    <div class="tile t-mint"><div class="sub">Cash</div><div class="v num">${fmt(c.cash)}</div></div>
+    <div class="tile t-sky"><div class="sub">Savings</div><div class="v num">${fmt(c.savings)}</div></div>
+    <div class="tile t-peach"><div class="sub">Cards owed</div><div class="v num">${fmt(c.owed)}</div></div>
+  </div>
+  <div class="card tint" style="background:var(--p-butter)"><div class="eyebrow">Money in the pot</div><div class="v num" style="font-family:var(--display);font-size:1.4rem">${fmt(c.pot)}</div><div class="sub">Checking + cash in the pot, minus minimums, minus cards in the pot. Your jars add up to ${fmt(c.jarsTotal)}.</div></div>
+  ${sect('Checking & cash','cash')}${sect('Savings','savings')}${sect('Credit cards','credit','owed')}
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="transfer">Transfer / pay a card</button><button class="btn" data-act="new-account">+ New account</button></div>`;
+}
 function renderPlan(){
-  const c=state.calc, d=state.data; const el=$('#view-plan');
-  el.innerHTML=`
-  <div class="hero" style="background:linear-gradient(135deg,var(--p-butter),var(--p-peach))">
-    <div class="eyebrow">Each paycheck</div>
-    <div class="big">${fmt(c.takeHome)}</div>
-    <div class="line"><span>${fmt(c.planTotal)} goes to the plan</span><span class="pill ${c.planGap<0?'over':'ok'}">${c.planGap<0?fmt(-c.planGap)+' short':fmt(c.planGap)+' free'}</span></div>
-  </div>
-  <button class="btn primary" data-act="add-kind" data-kind="paid" style="justify-self:start">💗 Log a paycheck</button>
-  <div class="card">
-    <div class="card-head"><h2>Paycheck split</h2></div>
-    <table class="tbl"><thead><tr><th>Goes to</th><th class="r">Each check</th><th class="r">Monthly</th></tr></thead><tbody>
-      ${c.plan.map(p=>`<tr class="click" data-act="cat" data-id="${p.id}"><td>${esc(p.name)}</td><td class="r num">${fmt(p.perCheck)}</td><td class="r num">${fmt(p.target)}</td></tr>`).join('')}
-      <tr class="total"><td>Total</td><td class="r num">${fmt(c.planTotal)}</td><td class="r num">${fmt(c.totalAllocated)}</td></tr>
-    </tbody></table>
-    <div class="sub" style="margin-top:8px">Half the monthly target per check, except Student loans (dad's ${fmt0(c.dad)} covers the rest). Tap a line to change it.</div>
-  </div>
-  <div class="card">
-    <div class="card-head"><h2>Goals &amp; big picture</h2></div>
-    <div class="rows">
-      <div class="row-item"><div class="t">${esc(c.hysaName||'HYSA')} now</div><div class="d">Adding ${fmt0(c.hysaMonthly)} a month</div><div class="a">${fmt(c.hysaBal)}</div></div>
-      <div class="row-item"><div class="t">Savings in 12 months</div><div class="d">No interest counted</div><div class="a in">${fmt(c.hysa12)}</div></div>
-      <div class="row-item"><div class="t">Extra paycheck</div><div class="d">${esc(d.settingsMap.extra_paycheck_estimate?.notes||'')}</div><div class="a">${fmt(c.extraCheck)}</div></div>
-      <div class="row-item"><div class="t">After paying off the card</div><div class="d">Extra check minus ${fmt0(c.cardExcluded)}</div><div class="a">${fmt(c.afterPayoff)}</div></div>
-      <div class="row-item"><div class="t">Student loan account</div><div class="d">Net moved in since opening</div><div class="a xfer">${fmt(c.tdSavingsNet)}</div></div>
-      <div class="row-item"><div class="t">Roth IRA</div><div class="d">Transfers into Roth IRA</div><div class="a xfer">${fmt(c.roth)}</div></div>
-      <div class="row-item"><div class="t">Commission received</div><div class="d">Income rows tagged Commission</div><div class="a xfer">${fmt(c.commissionNet)}</div></div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-head"><h2>Bills on autopilot</h2><button class="btn sm" data-act="add-bill">+ Bill</button></div>
-    <div class="rows">${(d.bills||[]).map(b=>`<div class="row-item click" data-act="bill" data-id="${b.id}"><div class="t">${esc(b.name)}${b.active?'':' <span class="pill hist">off</span>'}</div><div class="d">${b.day_of_month?'Around the '+ordinal(b.day_of_month)+' · ':''}${esc(b.category)} · ${esc(b.from_account)}</div><div class="a">${fmt(b.amount)}</div></div>`).join('')||'<div class="empty">No bills yet.</div>'}</div>
-    <div class="sub" style="margin-top:8px">These show on Home each month until you tap Paid. Tap one to change its amount or date.</div>
-  </div>
-  <div class="card">
-    <div class="card-head"><h2>Settings</h2></div>
-    <div class="rows">${d.settings.map(s=>`<div class="row-item click" data-act="setting" data-key="${esc(s.key)}"><div class="t">${esc(s.label)}</div><div class="d">${esc(s.notes||'')}</div><div class="a">${isNaN(Number(s.value))?esc(s.value):fmt(s.value)}</div></div>`).join('')}</div>
-  </div>
-  <div class="card notes">
-    <div class="card-head"><h2>Rules &amp; reminders</h2><button class="btn sm" data-act="add-note">+ Note</button></div>
-    ${d.notes.map(n=>`<p data-act="note" data-id="${n.id}" style="cursor:pointer"><b>${esc(n.title)}.</b> ${esc(n.body)}</p>`).join('')||'<div class="empty">No notes.</div>'}
-  </div>
+  const v=$('#view-plan'); const c=state.calc;
+  const grp=g=>{ const list=c.jars.filter(j=>j.grp===g); return `<div class="group-title"><span class="dot" style="background:${GRP_COLOR[g]}"></span>${g} <span class="muted small">· ${fmt(list.reduce((s,j)=>s+j.perCheck,0))} per check</span></div>
+    <div class="rows">${list.map(j=>`<div class="row-item click" data-act="jar" data-id="${j.id}"><div class="t">${esc(j.name)}</div><div class="d">${fmt(j.monthly)} a month${j.per_paycheck!=null&&j.per_paycheck!==''?' · custom per check':''}</div><div class="a">${fmt(j.perCheck)}</div></div>`).join('')}</div>`; };
+  v.innerHTML=`
+  <div class="hero"><div class="eyebrow">Each paycheck</div><div class="big num">${fmt(c.paycheck)}</div>
+    <div class="line"><span>${fmt(c.perCheckJars)} into jars · ${fmt(c.perCheckTransfers)} moved to savings</span></div>
+    <div class="line">${c.leftover>=0?`<span class="pill ok">${fmt(c.leftover)} left over → ${esc(setting('leftover_jar'))}</span>`:`<span class="pill over">Plan is ${fmt(-c.leftover)} more than the paycheck</span>`}</div></div>
+  <div class="quick" style="grid-template-columns:1fr 1fr"><button class="paid" data-act="paid"><span class="ic">💖</span>Log a paycheck</button><button class="moved" data-act="settings"><span class="ic">⚙️</span>Paycheck settings</button></div>
+  <div class="card"><div class="card-head"><h2>Where each check goes</h2><span class="sub">Tap a jar to change its amount</span></div>${GROUPS.map(grp).join('')}</div>
+  <div class="card"><div class="card-head"><h2>Transfers each check</h2><div class="actions"><button class="btn sm" data-act="new-transfer">+ Add</button></div></div>
+    <div class="rows">${c.transfersPlan.map(t=>`<div class="row-item click" data-act="transfer-rule" data-id="${t.id}"><div class="t">${esc(t.name)}</div><div class="d">→ ${esc(t.to_account)}</div><div class="a">${fmt(t.amount)}</div></div>`).join('')||'<div class="empty">No transfers set up.</div>'}</div></div>
   <div class="card"><div class="card-head"><h2>Account</h2></div><div class="sub" id="whoami"></div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="change-pass">Change password</button><button class="btn sm" data-act="signout">Sign out</button></div></div>`;
   sb.auth.getUser().then(({data})=>{ const w=$('#whoami'); if (w&&data.user) w.textContent='Signed in as '+data.user.email; });
 }
 
-/* ---------- Modal forms ---------- */
+/* ---------- Modal ---------- */
 function openModal(title, fieldsHTML, onSave, opts={}){
   const host=$('#modalHost');
   host.innerHTML=`<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><form class="sheet" id="modalForm">
@@ -664,228 +517,199 @@ const F = {
 };
 const afterSave = async msg => { toast(msg); await loadAll(); };
 const dbErr = r => { if (r.error) throw new Error(r.error.message); return r; };
-const accountNames = (kinds) => state.data.accounts.filter(a=>a.active&&(!kinds||kinds.includes(a.kind))).map(a=>a.name);
-function categoryList(){ const s=new Set(state.data.categories.filter(c=>c.active).map(c=>c.name)); state.data.funds.forEach(f=>(f.spend_categories||[]).forEach(c=>s.add(c))); return [...s]; }
-const fundFor = cat => state.data.funds.find(f=>f.active&&(f.name===cat||(f.spend_categories||[]).includes(cat)));
+const accountNames = kinds => state.calc.accounts.filter(a=>!kinds||kinds.includes(a.kind)).map(a=>a.name);
+const jarNames = grp => state.calc.jars.filter(j=>!grp||j.grp===grp).map(j=>j.name);
+const jarOpts = () => GROUPS.flatMap(g=>state.calc.jars.filter(j=>j.grp===g).map(j=>[j.name, `${j.name} (${fmt(j.balance)})`]));
 
-/* Add / edit a transaction. kind: spent | paid | moved | refund (edit mode infers it from the row) */
-function kindOf(t){ return t.type==='Expense'?'spent':t.type==='Income'?'paid':t.type==='Refund'?'refund':'moved'; }
-function txForm(t, kind){
-  const isNew=!t||!!t._prefill; kind = kind || (t?kindOf(t):'spent');
-  t = t || {date:todayISO(), amount:'', category:'', description:'', from_account:'Chase Checking', to_account:'External', historical:false, type:'Expense'};
-  const cats=categoryList(); const common=['Groceries','Dining out','Celsius','Household supplies','Toiletries','Shopping','Home','Gas','Gifts','Travel'].filter(c=>cats.includes(c));
-  const c=state.calc;
-  const kindsHTML=`<div class="kind" role="group" aria-label="What happened">
-    ${[['spent','🛍️','I spent'],['paid','💗','Got paid'],['moved','🔁','Moved'],['refund','↩️','Refund']].map(([k,ic,l])=>`<button type="button" data-kind="${k}" aria-pressed="${kind===k}"><span>${ic}</span>${l}</button>`).join('')}</div>`;
-  const html=`${kindsHTML}<input type="hidden" name="kind" value="${kind}">
-    ${F.amount('amount','How much')}
-    <div id="kindFields"></div>
-    <div class="grid2">${F.date('date','When',t.date)}${F.text('description','Note (optional)',t.description)}</div>
-    ${isNew?'':`${F.check('historical','History row (counts in the month, not in balances)',t.historical)}<div class="field"><label for="f_type">Advanced: type</label><select id="f_type" name="type">${['Expense','Income','Transfer','Refund','Opening'].map(x=>`<option ${t.type===x?'selected':''}>${x}</option>`).join('')}</select></div>`}`;
-  const paySplit = () => c.plan.filter(p=>p.actual_rule==='expense').reduce((m,p)=>{ const f=fundFor(p.name); if(f) m[f.name]=r2((m[f.name]||0)+p.perCheck); return m; },{});
-  const fieldsFor = k => {
-    if (k==='spent') return `<div class="field"><label>Category</label><div class="chips" id="catChips">${common.map(x=>`<button type="button" class="chip" data-cat="${esc(x)}" aria-pressed="${t.category===x}">${esc(x)}</button>`).join('')}</div>
-        <input id="f_category" name="category" list="catlist" value="${esc(t.category)}" placeholder="or type a category" autocomplete="off" style="margin-top:6px"><datalist id="catlist">${cats.map(x=>`<option value="${esc(x)}">`).join('')}</datalist></div>
-        ${F.sel('from_account','Paid with',accountNames(['cash','credit']),t.from_account==='External'?'Chase Checking':t.from_account)}<input type="hidden" name="to_account" value="External">`;
-    if (k==='paid') { const split=paySplit(); const isPay=!t.category||t.category==='Paycheck';
-      return `${F.sel('to_account','Into',accountNames(['cash','excluded']),t.to_account==='External'?'Chase Checking':t.to_account)}<input type="hidden" name="from_account" value="External">
-        ${F.text('category','What is it',t.category||'Paycheck','placeholder="Paycheck, Commission, Dad…"')}
-        ${isNew?`<div class="msg" style="display:grid;gap:8px"><label class="check"><input type="checkbox" name="split" ${isPay?'checked':''}> <span>Split it into my jars like the plan says</span></label>
-          <div class="sub">${Object.entries(split).map(([f,a])=>esc(f)+' '+fmt0(a)).join(' · ')}</div>
-          ${c.planTransfers.length?`<div class="sub" style="margin-top:4px">Also log the bank transfers for this check:</div>${c.planTransfers.map(p=>`<label class="check"><input type="checkbox" name="xfer_${p.id}" ${isPay?'checked':''}> <span>${fmt(p.perCheck)} to ${esc(p.rule_account)} (${esc(p.name)})</span></label>`).join('')}`:''}</div>`:''}`;
+/* Spent / refund. t = existing tx to edit, or {_prefill} for a new prefilled one */
+function spendForm(t, kind){
+  const isNew=!t||!!t._prefill; kind = kind || (t&&t.kind)||'spend';
+  t = t || {date:todayISO(), amount:'', jar:jarNames('Spending')[0]||'', account:'Chase Checking', note:''};
+  const html=`
+    <div class="kind" style="grid-template-columns:1fr 1fr"><button type="button" data-kind="spend" aria-pressed="${kind==='spend'}"><span>🛍️</span>Spent</button><button type="button" data-kind="refund" aria-pressed="${kind==='refund'}"><span>↩️</span>Refund</button></div>
+    ${F.amount('amount','Amount',t.amount)}
+    ${F.sel('jar','Jar',jarOpts(),t.jar)}
+    <div class="grid2">${F.sel('account','Paid with',accountNames(['cash','credit']),t.account)}${F.date('date','Date',t.date)}</div>
+    ${F.text('note','What was it? (optional)',t.note,'placeholder="e.g. Publix"')}
+    <input type="hidden" name="kind" value="${kind}">`;
+  openModal(isNew?'Log spending':'Edit', html, async fd=>{
+    const k=fd.get('kind'); const row={date:fd.get('date'), kind:k, account:fd.get('account'), jar:fd.get('jar'), amount:r2(num(fd.get('amount'))), note:fd.get('note').trim()};
+    if (row.amount<=0) throw new Error('Enter an amount.');
+    const signed = k==='refund'? row.amount : -row.amount;
+    if (isNew){
+      const r=dbErr(await sb.from('pb_transactions').insert(row).select().single());
+      dbErr(await sb.from('pb_jar_moves').insert({date:row.date, jar:row.jar, amount:signed, note:row.note, tx_id:r.data.id}));
+      await afterSave(k==='refund'?`Refund added to ${row.jar}`:`${fmt(row.amount)} out of ${row.jar}`);
+    } else {
+      dbErr(await sb.from('pb_transactions').update(row).eq('id',t.id));
+      dbErr(await sb.from('pb_jar_moves').delete().eq('tx_id',t.id));
+      dbErr(await sb.from('pb_jar_moves').insert({date:row.date, jar:row.jar, amount:signed, note:row.note, tx_id:t.id}));
+      await afterSave('Updated');
     }
-    if (k==='refund') return `${F.text('category','For which category',t.category,'list="catlist" placeholder="Same category as the purchase"')}<datalist id="catlist">${cats.map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
-        ${F.sel('to_account','Back into',accountNames(['cash','credit']),t.to_account==='External'?'Chase Checking':t.to_account)}<input type="hidden" name="from_account" value="External">`;
-    const all=accountNames();
-    return `<div class="grid2">${F.sel('from_account','From',['External',...all],t.from_account)}${F.sel('to_account','To',['External',...all],t.to_account==='External'&&isNew?'Barclays HYSA':t.to_account)}</div>
-        ${F.text('category','Label (optional)',t.category,'list="catlist" placeholder="e.g. HYSA contribution, Student loans, Card payment"')}<datalist id="catlist">${cats.map(x=>`<option value="${esc(x)}">`).join('')}</datalist>`;
-  };
-  openModal(isNew?'Add something':'Edit', html, async fd=>{
-    const k=fd.get('kind'); const amount=Number(fd.get('amount'));
-    const typeMap={spent:'Expense',paid:'Income',moved:'Transfer',refund:'Refund'};
-    const row={date:fd.get('date'),amount,category:(fd.get('category')||'').trim(),description:(fd.get('description')||'').trim(),from_account:fd.get('from_account'),to_account:fd.get('to_account'),type:isNew?typeMap[k]:(fd.get('type')||typeMap[k])};
-    if (!isNew) row.historical=!!fd.get('historical');
-    if (row.type!=='Opening' && !(amount>0)) throw new Error('Enter an amount above zero.');
-    if (row.from_account===row.to_account) throw new Error('From and To must be different.');
-    if (k==='spent' && !row.category) throw new Error('Pick a category so your jars and budget stay in sync.');
-    if (k==='moved' && !row.category){ if (row.to_account==='TD Savings') row.category='Student loans'; else if (/hysa/i.test(row.to_account)) row.category='HYSA contribution'; else if (state.data.accounts.find(a=>a.name===row.to_account&&a.kind==='credit')) row.category='Card payment'; else row.category='Transfer'; }
-    if (k==='paid' && !row.category) row.category='Paycheck';
-    dbErr(isNew? await sb.from('pb_transactions').insert(row) : await sb.from('pb_transactions').update(row).eq('id',t.id));
-    let extra='';
-    if (isNew && k==='paid' && fd.get('split')){ const split=paySplit(); const rows=Object.entries(split).map(([f,a])=>({date:row.date,fund:f,amount:a,source:'Paycheck '+row.date,details:'Planner split'})); if (rows.length){ dbErr(await sb.from('pb_allocations').insert(rows)); extra=' and filled '+rows.length+' jars'; } }
-    if (isNew && k==='paid'){ const xr=c.planTransfers.filter(p=>fd.get('xfer_'+p.id)).map(p=>({date:row.date,from_account:row.to_account,to_account:p.rule_account,type:'Transfer',category:p.name,amount:r2(p.perCheck),description:'From paycheck'})); if (xr.length){ dbErr(await sb.from('pb_transactions').insert(xr)); extra+=' + '+xr.length+' transfers'; } }
-    await afterSave(isNew?({spent:'Logged',paid:'Paycheck logged'+extra,moved:'Transfer logged',refund:'Refund logged'})[k]:'Saved');
-  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_transactions').delete().eq('id',t.id)); await afterSave('Deleted'); },
-    after: form=>{
-      const holder=form.querySelector('#kindFields'); const hidden=form.querySelector('[name=kind]');
-      const setKind=k=>{ hidden.value=k; form.querySelectorAll('.kind button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.kind===k)); holder.innerHTML=fieldsFor(k);
-        holder.querySelectorAll('.chip').forEach(ch=>ch.addEventListener('click',()=>{ const inp=holder.querySelector('#f_category'); inp.value=ch.dataset.cat; holder.querySelectorAll('.chip').forEach(x=>x.setAttribute('aria-pressed',x===ch)); }));
-        const inp=holder.querySelector('#f_category'); if (inp) inp.addEventListener('input',()=>holder.querySelectorAll('.chip').forEach(x=>x.setAttribute('aria-pressed',x.dataset.cat===inp.value))); };
-      form.querySelectorAll('.kind button').forEach(b=>b.addEventListener('click',()=>setKind(b.dataset.kind)));
-      setKind(kind); form.querySelector('[name=amount]').value=t.amount||'';
-    } });
+  }, { saveLabel:isNew?'Log it':'Save', onDelete: isNew?null: async()=>{ dbErr(await sb.from('pb_transactions').delete().eq('id',t.id)); await afterSave('Deleted'); },
+    after: form=>{ form.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{ form.querySelectorAll('[data-kind]').forEach(x=>x.setAttribute('aria-pressed',x===b)); form.querySelector('[name=kind]').value=b.dataset.kind; }); } });
 }
 
-function allocForm(a){
-  const isNew=!a; a=a||{date:todayISO(),fund:state.data.funds[0]?.name||'',amount:'',source:'',details:''};
-  const html=`${F.amount('amount','How much')}${F.sel('fund','Which jar',state.data.funds.filter(f=>f.active).map(f=>f.name),a.fund)}
-    <div class="grid2">${F.date('date','When',a.date)}${F.text('source','From where (optional)',a.source,'placeholder="e.g. Nov 18 paycheck"')}</div>${F.text('details','Note (optional)',a.details)}
-    ${isNew?'<div class="sub">To take money back out of a jar, enter a negative amount.</div>':''}`;
-  openModal(isNew?'Put money in a jar':'Edit jar entry', html, async fd=>{
-    const row={date:fd.get('date'),fund:fd.get('fund'),amount:Number(fd.get('amount')),source:(fd.get('source')||'').trim(),details:(fd.get('details')||'').trim()};
-    if (!row.amount) throw new Error('Enter an amount.');
-    dbErr(isNew? await sb.from('pb_allocations').insert(row) : await sb.from('pb_allocations').update(row).eq('id',a.id));
-    await afterSave(isNew?'Added to '+row.fund:'Saved');
-  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_allocations').delete().eq('id',a.id)); await afterSave('Deleted'); },
-      after: form=>{ form.querySelector('[name=amount]').removeAttribute('min'); form.querySelector('[name=amount]').value=a.amount||''; } });
+/* Paycheck: lands in an account, splits into jars, optional transfers */
+function paidForm(){
+  const c=state.calc; const amt=c.paycheck||'';
+  const html=`
+    ${F.amount('amount','Paycheck amount',amt)}
+    <div class="grid2">${F.sel('account','Lands in',accountNames(['cash']),setting('paycheck_account')||'Chase Checking')}${F.date('date','Date',todayISO())}</div>
+    <div class="card tint" style="background:var(--p-mint);padding:12px 14px"><div class="eyebrow">Left over → ${esc(setting('leftover_jar')||'Whatever Fund')}</div><div class="v num" id="leftover" style="font-family:var(--display);font-size:1.3rem">—</div><div class="sub">Everything below adds up to the paycheck. Change any amount.</div></div>
+    ${GROUPS.map(g=>`<div class="group-title"><span class="dot" style="background:${GRP_COLOR[g]}"></span>${g}</div><div class="rows">${c.jars.filter(j=>j.grp===g).map(j=>`<div class="row-item"><div class="t">${esc(j.name)}</div><div class="d">has ${fmt(j.balance)}</div><div class="a"><input class="split" name="jar_${j.id}" type="number" step="0.01" inputmode="decimal" value="${j.perCheck||''}" placeholder="0" style="width:96px;border:2px solid var(--line);border-radius:12px;padding:6px 8px;background:var(--bg);text-align:right;font-weight:800"></div></div>`).join('')}</div>`).join('')}
+    ${c.transfersPlan.length?`<div class="group-title"><span class="dot" style="background:var(--p-sky)"></span>Transfers</div><div class="rows">${c.transfersPlan.map(t=>`<div class="row-item"><label class="check" style="grid-column:1"><input type="checkbox" class="split" name="xfer_${t.id}" value="${num(t.amount)}" checked> <span>${esc(t.name)} → ${esc(t.to_account)}</span></label><div class="a">${fmt(t.amount)}</div></div>`).join('')}</div>`:''}
+    ${F.text('note','Note (optional)','Paycheck')}`;
+  openModal('I got paid 💖', html, async fd=>{
+    const amount=r2(num(fd.get('amount'))); if (amount<=0) throw new Error('Enter the paycheck amount.');
+    const date=fd.get('date'), account=fd.get('account'), note=fd.get('note').trim()||'Paycheck';
+    const splits=c.jars.map(j=>({jar:j.name, amount:r2(num(fd.get('jar_'+j.id)))})).filter(s=>s.amount>0);
+    const xfers=c.transfersPlan.filter(t=>fd.get('xfer_'+t.id)).map(t=>({date, kind:'transfer', account, to_account:t.to_account, amount:r2(num(t.amount)), note:t.name}));
+    const left=r2(amount - splits.reduce((s,x)=>s+x.amount,0) - xfers.reduce((s,x)=>s+x.amount,0));
+    if (left<-0.004) throw new Error(`The splits are ${fmt(-left)} more than the paycheck.`);
+    const lj=setting('leftover_jar')||'Whatever Fund';
+    if (left>0.004){ const ex=splits.find(s=>s.jar===lj); if (ex) ex.amount=r2(ex.amount+left); else splits.push({jar:lj, amount:left}); }
+    const r=dbErr(await sb.from('pb_transactions').insert({date, kind:'income', account, amount, note}).select().single());
+    if (splits.length) dbErr(await sb.from('pb_jar_moves').insert(splits.map(s=>({date, jar:s.jar, amount:s.amount, note:'Paycheck', tx_id:r.data.id}))));
+    if (xfers.length) dbErr(await sb.from('pb_transactions').insert(xfers));
+    await afterSave(`Paycheck split into ${splits.length} jars${xfers.length?' + '+xfers.length+' transfers':''}`);
+  }, { saveLabel:'Split it', after: form=>{
+    const upd=()=>{ const fd=new FormData(form); let s=0; c.jars.forEach(j=>s+=num(fd.get('jar_'+j.id))); c.transfersPlan.forEach(t=>{ if(fd.get('xfer_'+t.id)) s+=num(t.amount); }); const left=r2(num(fd.get('amount'))-s); const el=form.querySelector('#leftover'); el.textContent=fmt(left); el.style.color=left<-0.004?'var(--warn)':''; };
+    form.addEventListener('input',upd); upd(); } });
 }
 
-function catForm(c){
-  const isNew=!c; c=c||{name:'',monthly_target:0,per_paycheck:null,details:'',grp:'Home & personal',actual_rule:'expense',rule_account:'',in_total:true,sort:(state.data.categories.length+1),active:true};
-  const grps=[...new Set(state.data.categories.map(x=>x.grp).filter(Boolean))];
-  const html=`${F.text('name','Name',c.name,'required')}<div class="grid2">${F.num('monthly_target','Monthly target',c.monthly_target,'required')}${F.num('per_paycheck','Per paycheck (blank = half)',c.per_paycheck??'')}</div>
-    <div class="field"><label for="f_grp">Group</label><input id="f_grp" name="grp" list="grplist" value="${esc(c.grp||'')}"><datalist id="grplist">${grps.map(g=>`<option value="${esc(g)}">`).join('')}</datalist></div>
-    ${F.text('details','Details',c.details)}
-    <div class="grid2">${F.sel('actual_rule','Actual counts',[['expense','Spending in this category'],['to_account','Money moved into an account']],c.actual_rule)}${F.sel('rule_account','Account (for transfers)',['',...state.data.accounts.map(a=>a.name)],c.rule_account||'')}</div>
-    ${F.check('in_total','Part of the monthly plan total',c.in_total)}${isNew?'':F.check('active','Active',c.active)}`;
-  openModal(isNew?'New budget line':'Edit budget line', html, async fd=>{
-    const pp=fd.get('per_paycheck'); const row={name:fd.get('name').trim(),monthly_target:Number(fd.get('monthly_target'))||0,per_paycheck:pp===''?null:Number(pp),grp:(fd.get('grp')||'').trim(),details:(fd.get('details')||'').trim(),actual_rule:fd.get('actual_rule'),rule_account:fd.get('rule_account')||null,in_total:!!fd.get('in_total')};
-    if (!isNew) row.active=!!fd.get('active'); else row.sort=c.sort;
-    dbErr(isNew? await sb.from('pb_categories').insert(row) : await sb.from('pb_categories').update(row).eq('id',c.id));
-    await afterSave('Saved');
-  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_categories').delete().eq('id',c.id)); await afterSave('Deleted'); } });
+/* Edit an existing paycheck row (amount/date/account/note only) */
+function incomeEdit(t){
+  const html=`${F.amount('amount','Amount',t.amount)}<div class="grid2">${F.sel('account','Landed in',accountNames(['cash']),t.account)}${F.date('date','Date',t.date)}</div>${F.text('note','Note',t.note)}<div class="sub">The jar splits from this paycheck show under Moved. Deleting this paycheck also removes its splits.</div>`;
+  openModal('Edit paycheck', html, async fd=>{ dbErr(await sb.from('pb_transactions').update({amount:r2(num(fd.get('amount'))), account:fd.get('account'), date:fd.get('date'), note:fd.get('note').trim()}).eq('id',t.id)); await afterSave('Updated'); },
+   { onDelete: async()=>{ dbErr(await sb.from('pb_transactions').delete().eq('id',t.id)); await afterSave('Paycheck deleted'); } });
 }
 
-function fundForm(f){
-  const isNew=!f; f=f||{name:'',monthly_add:0,spend_categories:[],grp:'Sinking fund',notes:'',sort:(state.data.funds.length+1),active:true};
-  const html=`${F.text('name','Jar name',f.name,'required')}<div class="grid2">${F.num('monthly_add','Add each month',f.monthly_add)}${F.sel('grp','Type',[['Sinking fund','Savings jar'],['Monthly earmark','Bill set aside']],f.grp)}</div>
-    ${F.text('spend_categories','Spending that comes out of it (comma separated)',(f.spend_categories||[]).join(', '),'placeholder="defaults to the jar name"')}${F.text('notes','Notes',f.notes)}${isNew?'':F.check('active','Active',f.active)}`;
+/* Move money between two jars */
+function moveForm(){
+  const names=jarOpts();
+  const html=`${F.amount('amount','Amount')}<div class="grid2">${F.sel('from','From jar',names,names[0]?.[0])}${F.sel('to','To jar',names,names[1]?.[0])}</div><div class="grid2">${F.date('date','Date',todayISO())}${F.text('note','Note (optional)','')}</div>`;
+  openModal('Move between jars', html, async fd=>{
+    const a=r2(num(fd.get('amount'))), from=fd.get('from'), to=fd.get('to'), date=fd.get('date'), note=fd.get('note').trim();
+    if (from===to) throw new Error('Pick two different jars.');
+    dbErr(await sb.from('pb_jar_moves').insert([{date, jar:from, amount:-a, note:note||`To ${to}`},{date, jar:to, amount:a, note:note||`From ${from}`}]));
+    await afterSave(`${fmt(a)} moved to ${to}`);
+  }, { saveLabel:'Move' });
+}
+/* Add to / take from one jar, or edit a standalone move */
+function adjustForm(x, jar){
+  const isNew=!x; x = x || {date:todayISO(), jar:jar||jarNames()[0], amount:'', note:''};
+  const dir = isNew ? 'add' : (num(x.amount)>=0?'add':'take');
+  const html=`<div class="kind" style="grid-template-columns:1fr 1fr"><button type="button" data-dir="add" aria-pressed="${dir==='add'}"><span>➕</span>Add to jar</button><button type="button" data-dir="take" aria-pressed="${dir==='take'}"><span>➖</span>Take out</button></div>
+    ${F.amount('amount','Amount',x.amount===''?'':Math.abs(num(x.amount)))}${F.sel('jar','Jar',jarOpts(),x.jar)}<div class="grid2">${F.date('date','Date',x.date)}${F.text('note','Note (optional)',x.note)}</div><input type="hidden" name="dir" value="${dir}">
+    <div class="sub">This changes only the jar, not a bank account. Use it for starting balances and fixes.</div>`;
+  openModal(isNew?'Adjust a jar':'Edit jar move', html, async fd=>{
+    const a=r2(num(fd.get('amount'))); const row={date:fd.get('date'), jar:fd.get('jar'), amount:fd.get('dir')==='take'?-a:a, note:fd.get('note').trim()};
+    if (isNew) dbErr(await sb.from('pb_jar_moves').insert(row)); else dbErr(await sb.from('pb_jar_moves').update(row).eq('id',x.id));
+    await afterSave('Jar updated');
+  }, { onDelete: isNew?null: async()=>{ dbErr(await sb.from('pb_jar_moves').delete().eq('id',x.id)); await afterSave('Deleted'); },
+    after: form=>{ form.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{ form.querySelectorAll('[data-dir]').forEach(y=>y.setAttribute('aria-pressed',y===b)); form.querySelector('[name=dir]').value=b.dataset.dir; }); } });
+}
+/* Account to account (card payment, savings, etc.) */
+function transferForm(t){
+  const isNew=!t; t = t || {date:todayISO(), amount:'', account:'Chase Checking', to_account:accountNames(['credit'])[0]||'', note:''};
+  const html=`${F.amount('amount','Amount',t.amount)}<div class="grid2">${F.sel('account','From',accountNames(),t.account)}${F.sel('to_account','To',accountNames(),t.to_account)}</div><div class="grid2">${F.date('date','Date',t.date)}${F.text('note','Note (optional)',t.note)}</div><div class="sub">Paying a credit card is a transfer to that card. Jars don't change.</div>`;
+  openModal(isNew?'Transfer / pay a card':'Edit transfer', html, async fd=>{
+    const row={date:fd.get('date'), kind:'transfer', account:fd.get('account'), to_account:fd.get('to_account'), amount:r2(num(fd.get('amount'))), note:fd.get('note').trim()};
+    if (row.account===row.to_account) throw new Error('Pick two different accounts.');
+    if (isNew) dbErr(await sb.from('pb_transactions').insert(row)); else dbErr(await sb.from('pb_transactions').update(row).eq('id',t.id));
+    await afterSave(isNew?'Transfer logged':'Updated');
+  }, { onDelete: isNew?null: async()=>{ dbErr(await sb.from('pb_transactions').delete().eq('id',t.id)); await afterSave('Deleted'); } });
+}
+function jarForm(j){
+  const isNew=!j; j = j || {name:'', grp:'Spending', opening:0, monthly:'', per_paycheck:'', day_of_month:'', pay_from:'Chase Checking', notes:'', sort:(state.data.jars.length+1)*10};
+  const live = isNew?null: state.calc.jars.find(x=>x.id===j.id);
+  const html=`${F.text('name','Name',j.name,'required')}${F.sel('grp','Type',GROUPS,j.grp)}
+    <div class="grid2">${F.num('monthly','Monthly amount (bill price / savings goal)',j.monthly)}${F.num('per_paycheck','Per paycheck (blank = half of monthly)',j.per_paycheck??'')}</div>
+    <div class="grid2">${F.num('day_of_month','Due day (bills)',j.day_of_month??'','min="1" max="31" step="1"')}${F.sel('pay_from','Usually paid with',['',...accountNames(['cash','credit'])],j.pay_from||'')}</div>
+    ${F.text('notes','Notes',j.notes)}
+    ${live?`<div class="sub">Jar has ${fmt(live.balance)}. To change that, use "Adjust a jar".</div>`:F.num('opening','Starting balance',j.opening)}`;
   openModal(isNew?'New jar':'Edit jar', html, async fd=>{
-    const name=fd.get('name').trim(); let cats=(fd.get('spend_categories')||'').split(',').map(s=>s.trim()).filter(Boolean); if(!cats.length) cats=[name];
-    const row={name,monthly_add:Number(fd.get('monthly_add'))||0,grp:fd.get('grp'),spend_categories:cats,notes:(fd.get('notes')||'').trim()};
-    if (!isNew) row.active=!!fd.get('active'); else row.sort=f.sort;
-    if (!isNew && name!==f.name) dbErr(await sb.from('pb_allocations').update({fund:name}).eq('fund',f.name));
-    dbErr(isNew? await sb.from('pb_funds').insert(row) : await sb.from('pb_funds').update(row).eq('id',f.id));
+    const row={name:fd.get('name').trim(), grp:fd.get('grp'), monthly:r2(num(fd.get('monthly'))), per_paycheck:fd.get('per_paycheck')===''?null:r2(num(fd.get('per_paycheck'))), day_of_month:fd.get('day_of_month')===''?null:parseInt(fd.get('day_of_month'),10), pay_from:fd.get('pay_from')||null, notes:fd.get('notes').trim()};
+    if (!row.name) throw new Error('Give the jar a name.');
+    if (isNew){ row.opening=r2(num(fd.get('opening'))); row.sort=j.sort; dbErr(await sb.from('pb_jars').insert(row)); }
+    else { dbErr(await sb.from('pb_jars').update(row).eq('id',j.id)); if (row.name!==j.name){ dbErr(await sb.from('pb_jar_moves').update({jar:row.name}).eq('jar',j.name)); dbErr(await sb.from('pb_transactions').update({jar:row.name}).eq('jar',j.name)); } }
+    await afterSave(isNew?'Jar added':'Jar saved');
+  }, { onDelete: isNew?null: async()=>{ dbErr(await sb.from('pb_jars').update({active:false}).eq('id',j.id)); await afterSave('Jar removed'); } });
+}
+function jarSheet(id){
+  const j=state.calc.jars.find(x=>x.id===id); if(!j) return;
+  const moves=state.data.moves.filter(x=>x.jar===j.name).slice(0,8);
+  const html=`<div class="hero" style="padding:16px"><div class="eyebrow">${esc(j.grp)}</div><div class="big num ${j.balance<0?'neg':''}">${fmt(j.balance)}</div><div class="line"><span>${j.grp==='Spending'?(j.perCheck?'+'+fmt(j.perCheck)+' each paycheck':'No automatic top-up'):fmt(j.monthly)+' a month · '+fmt(j.perCheck)+' per check'}</span></div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn primary" data-go="spend">Spent from it</button><button type="button" class="btn" data-go="adjust">Adjust</button><button type="button" class="btn" data-go="edit">Edit jar</button></div>
+    <div><div class="eyebrow" style="margin-bottom:6px">Recent</div><div class="rows">${moves.map(x=>`<div class="row-item"><div class="t">${esc(x.note||(num(x.amount)>=0?'Added':'Spent'))}</div><div class="d">${esc(dayLabel(x.date))}</div><div class="a ${num(x.amount)>=0?'in':''}">${num(x.amount)>=0?'+':'-'}${fmt(Math.abs(num(x.amount)))}</div></div>`).join('')||'<div class="empty">No activity yet.</div>'}</div></div>`;
+  openModal(j.name, html, async()=>{}, { saveLabel:'Done', after: form=>{ form.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ const g=b.dataset.go; $('#modalHost').innerHTML=''; if (g==='spend') spendForm({_prefill:true, date:todayISO(), amount:'', jar:j.name, account:j.pay_from||'Chase Checking', note:''}); else if (g==='adjust') adjustForm(null, j.name); else jarForm(j); }); } });
+}
+function accountForm(a){
+  const isNew=!a; a = a || {name:'', kind:'cash', opening:0, reserve:0, in_pot:true, notes:'', sort:(state.data.accounts.length+1)*10};
+  const live = isNew?null: state.calc.accounts.find(x=>x.id===a.id);
+  const html=`${F.text('name','Name',a.name,'required')}${F.sel('kind','Type',[['cash','Checking / cash'],['savings','Savings / investment'],['credit','Credit card']],a.kind)}
+    <div class="grid2">${F.num('opening',isNew?'Starting balance (cards: amount owed)':'Starting balance (cards: owed)',a.opening)}${F.num('reserve','Minimum to keep',a.reserve)}</div>
+    ${F.check('in_pot','Counts toward money in the pot',a.in_pot)}${F.text('notes','Notes',a.notes)}
+    ${live?`<div class="sub">Balance now ${fmt(live.balance)} (starting balance plus everything logged).</div>`:''}`;
+  openModal(isNew?'New account':'Edit account', html, async fd=>{
+    const row={name:fd.get('name').trim(), kind:fd.get('kind'), opening:r2(num(fd.get('opening'))), reserve:r2(num(fd.get('reserve'))), in_pot:!!fd.get('in_pot'), notes:fd.get('notes').trim()};
+    if (isNew){ row.sort=a.sort; dbErr(await sb.from('pb_accounts').insert(row)); }
+    else { dbErr(await sb.from('pb_accounts').update(row).eq('id',a.id)); if (row.name!==a.name){ dbErr(await sb.from('pb_transactions').update({account:row.name}).eq('account',a.name)); dbErr(await sb.from('pb_transactions').update({to_account:row.name}).eq('to_account',a.name)); } }
+    await afterSave('Account saved');
+  }, { onDelete: isNew?null: async()=>{ dbErr(await sb.from('pb_accounts').update({active:false}).eq('id',a.id)); await afterSave('Account hidden'); } });
+}
+function transferRuleForm(t){
+  const isNew=!t; t = t || {name:'', to_account:accountNames(['savings'])[0]||'', amount:'', sort:(state.data.transfers.length+1)*10};
+  const html=`${F.text('name','Name',t.name,'required placeholder="e.g. Student loans"')}${F.sel('to_account','Goes to',accountNames(),t.to_account)}${F.num('amount','Amount each paycheck',t.amount)}`;
+  openModal(isNew?'New paycheck transfer':'Edit transfer', html, async fd=>{
+    const row={name:fd.get('name').trim(), to_account:fd.get('to_account'), amount:r2(num(fd.get('amount')))};
+    if (isNew){ row.sort=t.sort; dbErr(await sb.from('pb_paycheck_transfers').insert(row)); } else dbErr(await sb.from('pb_paycheck_transfers').update(row).eq('id',t.id));
     await afterSave('Saved');
-  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_funds').delete().eq('id',f.id)); await afterSave('Deleted'); } });
+  }, { onDelete: isNew?null: async()=>{ dbErr(await sb.from('pb_paycheck_transfers').update({active:false}).eq('id',t.id)); await afterSave('Removed'); } });
 }
-
-function accountsForm(){
-  const list=state.data.accounts;
-  const html=`<div class="sub">Balances change through activity; this only sets how each account is treated.</div>
-    <div class="scrollx"><table class="tbl"><thead><tr><th>Account</th><th>Kind</th><th>Spendable</th><th class="r">Keep</th></tr></thead><tbody>
-    ${list.map(a=>`<tr><td>${esc(a.name)}</td><td><select name="kind_${a.id}">${['cash','credit','excluded'].map(k=>`<option ${a.kind===k?'selected':''}>${k}</option>`).join('')}</select></td><td><input type="checkbox" name="sp_${a.id}" ${a.in_spendable?'checked':''}></td><td class="r"><input type="number" step="0.01" name="min_${a.id}" value="${num(a.min_reserve)}" style="width:90px"></td></tr>`).join('')}
-    </tbody></table></div>
-    ${F.text('newname','Add an account (name)','')}`;
-  openModal('Accounts', html, async fd=>{
-    for (const a of list){ const row={kind:fd.get('kind_'+a.id),in_spendable:!!fd.get('sp_'+a.id),min_reserve:Number(fd.get('min_'+a.id))||0};
-      if (row.kind!==a.kind||row.in_spendable!==a.in_spendable||row.min_reserve!==num(a.min_reserve)) dbErr(await sb.from('pb_accounts').update(row).eq('id',a.id)); }
-    const nn=(fd.get('newname')||'').trim(); if (nn) dbErr(await sb.from('pb_accounts').insert({name:nn,kind:'cash',in_spendable:true,sort:list.length+1}));
-    await afterSave('Accounts saved');
+function settingsForm(){
+  const html=`${F.num('paycheck_amount','Usual paycheck (take-home)',setting('paycheck_amount'))}${F.sel('paycheck_account','Paychecks land in',accountNames(['cash']),setting('paycheck_account'))}${F.sel('leftover_jar','Leftovers go to',jarNames(),setting('leftover_jar'))}`;
+  openModal('Paycheck settings', html, async fd=>{
+    const rows=['paycheck_amount','paycheck_account','leftover_jar'].map(k=>({key:k, value:String(fd.get(k)??'')}));
+    dbErr(await sb.from('pb_settings').upsert(rows)); await afterSave('Saved');
   });
-}
-function accountForm(name){
-  const a=state.data.accounts.find(x=>x.name===name); if(!a) return;
-  const html=`${F.text('name','Name',a.name,'required')}${F.sel('kind','Kind',[['cash','Cash (counts in total cash)'],['credit','Credit card (owed)'],['excluded','Not counted (loan / investment)']],a.kind)}
-    <div class="grid2">${F.num('min_reserve','Always keep (reserve)',a.min_reserve)}<div class="field"><label>&nbsp;</label>${F.check('in_spendable','Counts as spendable',a.in_spendable)}</div></div>${F.text('notes','Notes',a.notes)}${F.check('active','Active',a.active)}`;
-  openModal('Edit account', html, async fd=>{
-    const row={name:fd.get('name').trim(),kind:fd.get('kind'),min_reserve:Number(fd.get('min_reserve'))||0,in_spendable:!!fd.get('in_spendable'),notes:(fd.get('notes')||'').trim(),active:!!fd.get('active')};
-    if (row.name!==a.name){
-      dbErr(await sb.from('pb_transactions').update({from_account:row.name}).eq('from_account',a.name));
-      dbErr(await sb.from('pb_transactions').update({to_account:row.name}).eq('to_account',a.name));
-      dbErr(await sb.from('pb_categories').update({rule_account:row.name}).eq('rule_account',a.name));
-    }
-    dbErr(await sb.from('pb_accounts').update(row).eq('id',a.id)); await afterSave('Saved');
-  });
-}
-function settingForm(key){
-  const s=state.data.settingsMap[key]; if(!s) return;
-  openModal(s.label, `${F.text('value','Value',s.value,'required')}${F.text('notes','Notes',s.notes)}`, async fd=>{
-    dbErr(await sb.from('pb_settings').update({value:fd.get('value').trim(),notes:(fd.get('notes')||'').trim()}).eq('key',key)); await afterSave('Saved'); });
-}
-function noteForm(n){
-  const isNew=!n; n=n||{title:'',body:'',sort:(state.data.notes.length+1)};
-  openModal(isNew?'Add note':'Edit note', `${F.text('title','Title',n.title,'required')}${F.area('body','Note',n.body)}`, async fd=>{
-    const row={title:fd.get('title').trim(),body:(fd.get('body')||'').trim()}; if(isNew) row.sort=n.sort;
-    dbErr(isNew? await sb.from('pb_notes').insert(row) : await sb.from('pb_notes').update(row).eq('id',n.id)); await afterSave('Saved');
-  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_notes').delete().eq('id',n.id)); await afterSave('Deleted'); } });
 }
 function changePassForm(){
-  openModal('Change password', `${F.text('p1','New password','','type="password" minlength="6" required autocomplete="new-password"')}${F.text('p2','Repeat it','','type="password" minlength="6" required autocomplete="new-password"')}`, async fd=>{
+  openModal('Change password', `${F.text('p1','New password','','type="password" minlength="6" required')}${F.text('p2','Again','','type="password" minlength="6" required')}`, async fd=>{
     if (fd.get('p1')!==fd.get('p2')) throw new Error('Passwords do not match.');
     const { error } = await sb.auth.updateUser({ password: fd.get('p1') }); if (error) throw new Error(error.message); toast('Password changed');
   });
 }
-
-function billForm(b){
-  const isNew=!b; b=b||{name:'',amount:'',day_of_month:'',category:'',from_account:'Chase Checking',notes:'',active:true,sort:((state.data.bills||[]).length+1)};
-  const cats=categoryList();
-  const html=`${F.text('name','Bill',b.name,'required')}<div class="grid2">${F.num('amount','Usual amount',b.amount,'required')}${F.num('day_of_month','Day of month (optional)',b.day_of_month??'','min="1" max="31" step="1"')}</div>
-    <div class="field"><label for="f_category">Budget category</label><input id="f_category" name="category" list="catlist" value="${esc(b.category)}" required><datalist id="catlist">${cats.map(x=>`<option value="${esc(x)}">`).join('')}</datalist></div>
-    ${F.sel('from_account','Paid with',accountNames(['cash','credit']),b.from_account)}${F.text('notes','Notes',b.notes)}${isNew?'':F.check('active','Active',b.active)}`;
-  openModal(isNew?'New bill':'Edit bill', html, async fd=>{
-    const dm=fd.get('day_of_month'); const row={name:fd.get('name').trim(),amount:Number(fd.get('amount'))||0,day_of_month:dm===''?null:Number(dm),category:fd.get('category').trim(),from_account:fd.get('from_account'),notes:(fd.get('notes')||'').trim()};
-    if (!isNew) row.active=!!fd.get('active'); else row.sort=b.sort;
-    dbErr(isNew? await sb.from('pb_bills').insert(row) : await sb.from('pb_bills').update(row).eq('id',b.id)); await afterSave('Saved');
-  },{ onDelete:isNew?null:async()=>{ dbErr(await sb.from('pb_bills').delete().eq('id',b.id)); await afterSave('Deleted'); } });
-}
 function payBill(id){
-  const b=(state.data.bills||[]).find(x=>x.id===id); if(!b) return;
-  const [y,m]=state.month.split('-').map(Number); const dim=new Date(y,m,0).getDate();
-  const date=state.calc.isCurrentMonth?todayISO():state.month+'-'+String(Math.min(b.day_of_month||1,dim)).padStart(2,'0');
-  txForm({date, amount:num(b.amount), category:b.category, description:b.name, from_account:b.from_account, to_account:'External', historical:false, type:'Expense', _prefill:true}, 'spent');
+  const b=state.calc.jars.find(j=>j.id===id); if(!b) return;
+  spendForm({_prefill:true, date:todayISO(), amount:num(b.monthly), jar:b.name, account:b.pay_from||'Chase Checking', note:b.name}, 'spend');
 }
-function closeMonthForm(){
-  const c=state.calc; const m=state.month;
-  if (!c.whatever) { toast('Add a jar named Whatever Fund first'); return; }
-  const moves=c.closeMoves; const total=r2(moves.reduce((s,x)=>s+x.amount,0));
-  const html=`<div class="msg">${moves.length?`Moving ${fmt(total)} into ${esc(c.whatever.name)}:`:'Nothing to sweep this month. Every jar keeps its balance.'}</div>
-    ${moves.length?`<div class="rows">${moves.map(mv=>`<div class="row-item"><div class="t">${mv.from?esc(mv.from)+' leftover':'Unassigned cash'}</div><div class="a in">+${fmt(mv.amount)}</div></div>`).join('')}<div class="row-item"><div class="t">${esc(c.whatever.name)} after</div><div class="a">${fmt(r2(c.whatever.balance+total))}</div></div></div>`:''}
-    ${c.unassigned<-0.004?`<div class="msg err">You spent ${fmt(-c.unassigned)} that no jar covered. Closing still works, but top up a jar so the numbers match.</div>`:''}
-    <div class="sub">Wi-Fi, groceries, dining, travel and every other jar roll over untouched. The sweep shows up in Jar history and can be undone by deleting those entries.</div>`;
-  openModal('Close '+monthName(m), html, async fd=>{
-    const [y,mo]=m.split('-').map(Number); const last=m+'-'+String(new Date(y,mo,0).getDate()).padStart(2,'0');
-    const rows=[]; moves.forEach(mv=>{ if(mv.from) rows.push({date:last,fund:mv.from,amount:-mv.amount,source:'Close '+monthName(m),details:'Unused, swept to '+c.whatever.name}); rows.push({date:last,fund:c.whatever.name,amount:mv.amount,source:'Close '+monthName(m),details:mv.from?'From '+mv.from:'Unassigned cash'}); });
-    if (rows.length) dbErr(await sb.from('pb_allocations').insert(rows));
-    dbErr(await sb.from('pb_settings').upsert({key:'last_closed_month',value:m,label:'Last closed month',notes:'Set automatically by Close month',sort:9}));
-    await afterSave(monthName(m)+' closed');
-  },{saveLabel:'Close '+monthLong(m)});
+function editItem(id){
+  if (id[0]==='m'){ const x=state.data.moves.find(m=>'m'+m.id===id); if (x) adjustForm(x); return; }
+  const t=state.data.transactions.find(r=>'t'+r.id===id); if(!t) return;
+  if (t.kind==='spend'||t.kind==='refund') spendForm(t); else if (t.kind==='income') incomeEdit(t); else transferForm(t);
 }
 
 /* ---------- Events ---------- */
-document.addEventListener('click', async e=>{
-  const tab=e.target.closest('nav.tabs button'); if (tab){ state.tab=tab.dataset.tab; try{localStorage.setItem('pb_tab2',state.tab);}catch(x){} render(); window.scrollTo({top:0}); return; }
-  const go=e.target.closest('[data-tab-go]'); if (go){ state.tab=go.dataset.tabGo; render(); window.scrollTo({top:0}); return; }
-  const filt=e.target.closest('[data-filter]'); if (filt){ state.actFilter=filt.dataset.filter; renderActivity(); return; }
-  const act=e.target.closest('[data-act]'); if (!act) return;
-  const d=state.data; const id=Number(act.dataset.id);
-  switch(act.dataset.act){
-    case 'add-kind': txForm(null, act.dataset.kind); break;
-    case 'tx': txForm(d.transactions.find(t=>t.id===id)); break;
-    case 'add-alloc': allocForm(null); break;
-    case 'alloc': allocForm(d.allocations.find(a=>a.id===id)); break;
-    case 'add-cat': catForm(null); break;
-    case 'cat': catForm(d.categories.find(c=>c.id===id)); break;
-    case 'add-fund': fundForm(null); break;
-    case 'fund': fundForm(d.funds.find(f=>f.id===id)); break;
-    case 'edit-accounts': accountsForm(); break;
-    case 'acct': accountForm(act.dataset.name); break;
-    case 'setting': settingForm(act.dataset.key); break;
-    case 'add-note': noteForm(null); break;
-    case 'note': noteForm(d.notes.find(n=>n.id===id)); break;
-    case 'pay-bill': payBill(id); break;
-    case 'add-bill': billForm(null); break;
-    case 'bill': billForm((d.bills||[]).find(b=>b.id===id)); break;
-    case 'close-month': closeMonthForm(); break;
-    case 'change-pass': changePassForm(); break;
-    case 'signout': await sb.auth.signOut(); showAuth(); break;
-  }
+document.addEventListener('click', e => {
+  const tabBtn=e.target.closest('[data-tab]'); if (tabBtn){ state.tab=tabBtn.dataset.tab; try{localStorage.setItem('pb_tab4',state.tab);}catch(_){} render(); return; }
+  const go=e.target.closest('[data-tab-go]'); if (go){ state.tab=go.dataset.tabGo; render(); return; }
+  const f=e.target.closest('[data-filter]'); if (f){ state.actFilter=f.dataset.filter; renderActivity(); return; }
+  const el=e.target.closest('[data-act]'); if (!el) return;
+  const act=el.dataset.act, id=el.dataset.id;
+  const acts={
+    spent:()=>spendForm(null,'spend'), paid:()=>paidForm(), moved:()=>moveForm(), adjust:()=>adjustForm(),
+    pay:()=>payBill(+id), jar:()=>jarSheet(+id), 'new-jar':()=>jarForm(), account:()=>accountForm(state.data.accounts.find(a=>a.id===+id)), 'new-account':()=>accountForm(),
+    transfer:()=>transferForm(), 'transfer-rule':()=>transferRuleForm(state.data.transfers.find(t=>t.id===+id)), 'new-transfer':()=>transferRuleForm(),
+    settings:()=>settingsForm(), edit:()=>editItem(id), 'change-pass':()=>changePassForm(), signout:()=>sb.auth.signOut(),
+  };
+  if (acts[act]) acts[act]();
 });
-$('#fab').addEventListener('click',()=>txForm(null,'spent'));
-$('#prevMonth').addEventListener('click',()=>{ state.month=shiftMonth(state.month,-1); recompute(); render(); });
-$('#nextMonth').addEventListener('click',()=>{ state.month=shiftMonth(state.month,1); recompute(); render(); });
-document.addEventListener('keydown',e=>{ if (e.key==='Escape') $('#modalHost').innerHTML=''; });
-document.addEventListener('visibilitychange',()=>{ if (document.visibilityState==='visible' && state.data && !$('#appView').hidden) loadAll(); });
+document.addEventListener('keydown', e => { if (e.key==='Enter' && e.target.matches('.jar[role=button]')) e.target.click(); });
+$('#fab').addEventListener('click', ()=>spendForm(null,'spend'));
+$('#prevMonth').addEventListener('click', ()=>{ state.month=shiftMonth(state.month,-1); recompute(); render(); });
+$('#nextMonth').addEventListener('click', ()=>{ state.month=shiftMonth(state.month,1); recompute(); render(); });
 
 initAuth();
 })();
